@@ -62,21 +62,6 @@ def latex_image(name:str, alt:str='', attrs:str=''):
 def feh(path:str):
   call(['eog',path])
 
-def plotcircuitP(fpath:Filepath, c:QuantumCircuit, **kwargs)->None:
-  def _stage(r:Registry)->DRef:
-    in_prog=hash(c.qasm())
-    in_kwargs={str(k):str(v) for k,v in kwargs.items()}
-    def _config():
-      nonlocal in_prog, in_kwargs
-      out_png=[selfref, 'out.png']
-      return locals()
-    def _make(b:Build):
-      # build_setoutpaths(b,1)
-      plotcircuit(mklens(b).out_png.syspath, c, **kwargs)
-    return mkdrv(mkconfig(_config()), match_only(), build_wrapper(_make),r=r)
-  rref=realize1(instantiate(_stage))
-  copyfile(mklens(rref).out_png.syspath, fpath)
-
 
 def plotaltair(fpath:Filepath, c:Chart):
   altair_save(c, fpath)

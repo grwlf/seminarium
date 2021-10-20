@@ -109,6 +109,8 @@ let
 
           z3
           dataclasses-json
+          sympy
+          setuptools_scm
         ]);
 
       inherit (pkgs) cudatoolkit cudnn magma;

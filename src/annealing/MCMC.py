@@ -47,18 +47,18 @@ def tsuggestX(X:float,t:Task)->float:
 
 @dataclass_json
 @dataclass
-class SimannealingResults:
+class MetropolisResults:
   Xs:List[float]
   Ys:List[float]
   Ps:List[float]
   Ac:List[int]
 
 
-def simannealing(F:Callable[[float],float],
+def metropolis(F:Callable[[float],float],
                  G:Callable[[float],float],
                  T:float,
                  X_0:float,
-                 steps:int=100)->SimannealingResults:
+                 steps:int=100)->MetropolisResults:
   """ Find the minimum of `F` using the MCMC algorithm. Evolve the F's argument
   according to the `MC` step function """
   step=0
@@ -82,7 +82,7 @@ def simannealing(F:Callable[[float],float],
     Ys.append(Y)
     Ac.append(1 if accept else 0)
     step+=1
-  return SimannealingResults(Xs,Ys,Ps,Ac)
+  return MetropolisResults(Xs,Ys,Ps,Ac)
 
 
 #  ____  _
@@ -110,7 +110,7 @@ def stage_koefs(index:int, r:Registry)->DRef:
     np.save(mklens(b).out_ks.syspath,r)
   return mkdrv(config(), match_only(), build_wrapper(make), r)
 
-def stage_simannealing(ref_koefs:DRef, r:Registry):
+def stage_metropolis(ref_koefs:DRef, r:Registry):
   def config():
     nonlocal ref_koefs
     task_size=100
@@ -125,7 +125,7 @@ def stage_simannealing(ref_koefs:DRef, r:Registry):
       np.load(mklens(b).ref_koefs.out_ks.syspath))
     F=partial(teval,t=t)
     G=partial(tsuggestX,t=t)
-    mr=simannealing(F=F,G=G,
+    mr=metropolis(F=F,G=G,
                     T=mklens(b).T.val,
                     X_0=0,
                     steps=mklens(b).steps.val)
@@ -136,7 +136,7 @@ def stage_simannealing(ref_koefs:DRef, r:Registry):
 
 def stage_experiment1(r:Registry):
   ref_koefs=stage_koefs(0,r)
-  ref_metr=stage_simannealing(ref_koefs,r)
+  ref_metr=stage_metropolis(ref_koefs,r)
   return ref_metr
 
 #  ____
@@ -146,42 +146,16 @@ def stage_experiment1(r:Registry):
 # |_| \_\\__,_|_| |_|_| |_|\___|_|  |___/
 #
 
-def run()->Tuple[RRef,SimannealingResults]:
+def run()->Tuple[RRef,MetropolisResults]:
   r=realize1(instantiate(stage_experiment1))
   with open(mklens(r).out_results.syspath) as f:
-    mr=SimannealingResults.from_dict(json_load(f)) # type: ignore
+    mr=MetropolisResults.from_dict(json_load(f)) # type: ignore
   return (r,mr)
 
 curref,curmr=run()
 
 
-# def run2():
-#   acc:dict={'T':[],'D':[]}
-#   for T in reversed(np.linspace(0,1.0,100)[1:]):
-#     print(f"T={T}")
-#     r=Registry()
-#     dref_koefs=stage_koefs(0,r)
-#     dref_metr=stage_simannealing(dref_koefs,r,T=T)
-#     rref_metr=realize1(instantiate(dref_metr,r=r))
-#     res=json_load(open(mklens(rref_metr).out_results.syspath))
-#     acc['T'].append(T)
-#     acc['D'].append(abs(res['Y_ful']-res['Y_met']))
-#   return acc
-
-
-
-def plot_f(rref=curref):
-  t=Task(
-    mklens(rref).task_size.val,
-    np.load(mklens(rref).ref_koefs.out_ks.syspath))
-  Xs=np.arange(0,t.size-1)
-  Ys=list(map(lambda x:teval(x,t),Xs))
-  plot(Xs,Ys)
-  kshow()
-  plt.close()
-
-
-def plot_hist(rref=curref,mr=curmr):
+def plots(rref=curref,mr=curmr):
   t=Task(
     mklens(rref).task_size.val,
     np.load(mklens(rref).ref_koefs.out_ks.syspath))
@@ -189,15 +163,13 @@ def plot_hist(rref=curref,mr=curmr):
   Ys=list(map(lambda x:teval(x,t),allXs))
   Xs=mr.Xs
   fig,(axF,axXs,ax1,ax2)=subplots(4)
-  axF.plot(allXs,Ys)
-  axXs.plot(Xs)
-  ax1.hist(Xs)
-  ax2.hist(Ys)
+  axF.plot(allXs,Ys,label='F')
+  axXs.plot(Xs,color='red',label='X(time)')
+  ax1.hist(Xs,label='Visited X')
+  ax2.hist(Ys,color='orange',label='Visited Y')
+  fig.legend()
   kshow()
   plt.close()
-
-  # plt.plot(Xs,Ys)
-  # plt.show()
 
 
 

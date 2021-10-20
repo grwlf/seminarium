@@ -3,6 +3,7 @@
 set wrap
 set conceallevel=0
 set textwidth=80
+set nowrap
 
 function! Ident(ident_spaces)
   let &expandtab=1

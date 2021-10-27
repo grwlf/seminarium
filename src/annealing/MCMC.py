@@ -3,7 +3,7 @@ import sympy
 from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
                         match_only, build_wrapper, writejson, readjson,
-                        writestr, filehash, shell, pyobjhash)
+                        writestr, filehash, shell, pyobjhash, realize)
 
 import numpy as np
 from numpy.random import seed as np_seed, choice as np_choice
@@ -60,10 +60,10 @@ class MetropolisResults:
 
 
 def metropolis(F:Callable[[float],float],
-                 G:Callable[[float],float],
-                 T:float,
-                 X_0:float,
-                 steps:int=100)->MetropolisResults:
+               G:Callable[[float],float],
+               T:float,
+               X_0:float,
+               steps:int=100)->MetropolisResults:
   """ Find the minimum of `F` using the MCMC algorithm. Evolve the F's argument
   according to the `MC` step function """
   step=0
@@ -139,10 +139,38 @@ def stage_metropolis(ref_koefs:DRef, r:Registry):
   return mkdrv(config(), match_only(), build_wrapper(make), r=r)
 
 
+def stage_findT0(ref_metr:DRef, r:Registry):
+  def config():
+    nonlocal ref_metr
+    T0min=0.0001
+    T0max=1e6
+    factor=2
+    waitsteps=10
+    Paccept_tgt=0.95
+    out_T0 = [selfref, 'T0.npy']
+    depends = pyobjhash([metropolis,teval,tsuggestX,stage_findT0])
+    return mkconfig(locals())
+  def make(b:Build):
+    t=tload(mklens(b).ref_metr.rref)
+    F=partial(teval,t=t)
+    G=partial(tsuggestX,t=t)
+    T0i=float(mklens(b).T0min.val)
+    while T0i<mklens(b).T0max.val:
+      r=metropolis(F=F,G=G,T=T0i,X_0=0,steps=mklens(b).waitsteps.val)
+      Paccept=np.mean(r.Ac)
+      print(f"T0i {T0i} Paccept {Paccept}")
+      if Paccept>=mklens(b).Paccept_tgt.val:
+        break
+      T0i*=mklens(b).factor.val
+    np.save(mklens(b).out_T0.syspath,T0i)
+  return mkdrv(config(), match_only(), build_wrapper(make), r=r)
+
+
 def stage_experiment1(r:Registry):
   ref_koefs=stage_koefs(0,r)
   ref_metr=stage_metropolis(ref_koefs,r)
-  return ref_metr
+  ref_T0=stage_findT0(ref_metr,r)
+  return (ref_metr,ref_T0)
 
 #  ____
 # |  _ \ _   _ _ __  _ __   ___ _ __ ___
@@ -151,25 +179,29 @@ def stage_experiment1(r:Registry):
 # |_| \_\\__,_|_| |_|_| |_|\___|_|  |___/
 #
 
-def run()->Tuple[RRef,MetropolisResults]:
-  r=realize1(instantiate(stage_experiment1))
-  with open(mklens(r).out_results.syspath) as f:
+def run()->Tuple[RRef,RRef,MetropolisResults]:
+  (r,rT0),clo,ctx=realize(instantiate(stage_experiment1))
+  assert isinstance(r,DRef)
+  assert isinstance(rT0,DRef)
+  with open(mklens(ctx[r][0]).out_results.syspath) as f:
     mr=MetropolisResults.from_dict(json_load(f)) # type: ignore
-  return (r,mr)
+  return (ctx[r][0],ctx[rT0][0],mr)
 
-curref,curmr=run()
+curref,curT0,curmr=run()
+print('T0 =',np.load(mklens(curT0).out_T0.syspath))
 
+
+# currefT0=realize1(instantiate(stage_findT0
 
 def plots(rref=curref,mr=curmr):
   t:Task=tload(rref)
   allXs=np.arange(0,t.size-1)
   Ys=list(map(lambda x:teval(x,t),allXs))
-  Xs=mr.Xs
   fig,(axF,axXs,ax1,ax2)=subplots(4)
   axF.plot(allXs,Ys,label='F')
-  axXs.plot(Xs,color='red',label='X(time)')
-  ax1.hist(Xs,label='Visited X')
-  ax2.hist(Ys,color='orange',label='Visited Y')
+  axXs.plot(mr.Xs,color='red',label='X(time)')
+  ax1.hist(mr.Xs,label='Visited X')
+  ax2.hist(mr.Ys,color='orange',label='Visited Y')
   fig.legend()
   kshow()
   plt.close()

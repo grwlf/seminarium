@@ -3,7 +3,7 @@ import sympy
 from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
                         match_only, build_wrapper, writejson, readjson,
-                        writestr, filehash, shell)
+                        writestr, filehash, shell, pyobjhash)
 
 import numpy as np
 from numpy.random import seed as np_seed, choice as np_choice
@@ -28,6 +28,11 @@ plt.style.use('dark_background')
 class Task:
   size:int
   ks:List[float]
+
+def tload(ref:Union[RRef,Build])->Task:
+  return Task(
+    mklens(ref).task_size.val,
+    np.load(mklens(ref).ref_koefs.out_ks.syspath))
 
 def teval(x:float,t:Task)->float:
   """ A random function to find the minimum of """
@@ -95,15 +100,16 @@ def metropolis(F:Callable[[float],float],
 
 def stage_koefs(index:int, r:Registry)->DRef:
   def config():
+    nonlocal index
     name='koefs'
     N=100
     scale=1
     out_ks = [selfref, 'ks.npy']
-    nonlocal index
-    v=10
+    depends = pyobjhash([metropolis,teval,tsuggestX,stage_koefs])
     return mkconfig(locals())
   def make(b:Build):
     # np_seed(17)
+    print('Generating coeffs')
     r=np.random.rand(mklens(b).N.val)
     r-=0.5
     r*=2*mklens(b).scale.val
@@ -117,12 +123,11 @@ def stage_metropolis(ref_koefs:DRef, r:Registry):
     steps=100*task_size
     T=4.0
     out_results=[selfref, "results.json"]
-    v=6
+    depends = pyobjhash([metropolis,teval,tsuggestX,stage_metropolis])
     return mkconfig(locals())
   def make(b:Build):
-    t=Task(
-      mklens(b).task_size.val,
-      np.load(mklens(b).ref_koefs.out_ks.syspath))
+    print('Running metropolis')
+    t=tload(b)
     F=partial(teval,t=t)
     G=partial(tsuggestX,t=t)
     mr=metropolis(F=F,G=G,
@@ -156,9 +161,7 @@ curref,curmr=run()
 
 
 def plots(rref=curref,mr=curmr):
-  t=Task(
-    mklens(rref).task_size.val,
-    np.load(mklens(rref).ref_koefs.out_ks.syspath))
+  t:Task=tload(rref)
   allXs=np.arange(0,t.size-1)
   Ys=list(map(lambda x:teval(x,t),allXs))
   Xs=mr.Xs

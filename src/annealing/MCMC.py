@@ -4,7 +4,7 @@ from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
                         match_only, build_wrapper, writejson, readjson,
                         writestr, filehash, shell, pyobjhash, realize,
-                        match_latest)
+                        match_latest, autostage, Placeholder)
 
 import numpy as np
 from numpy.random import seed as np_seed, choice as np_choice
@@ -108,121 +108,93 @@ def metropolis(F:Callable[[float],float],
 #                |___/
 
 
-def stage_koefs(index:int, r:Registry)->DRef:
-  def config():
-    nonlocal index
-    name='koefs'
-    N=100
-    scale=1
-    out_ks = [selfref, 'ks.npy']
-    depends = pyobjhash([metropolis,teval,tsuggestX,stage_koefs])
-    return mkconfig(locals())
-  def make(b:Build):
-    # np_seed(17)
-    print('Generating coeffs')
-    r=np.random.rand(mklens(b).N.val)
-    r-=0.5
-    r*=2*mklens(b).scale.val
-    np.save(mklens(b).out_ks.syspath,r)
-  return mkdrv(config(), match_only(), build_wrapper(make), r)
-
-def stage_metropolis(ref_koefs:DRef, r:Registry):
-  def config():
-    nonlocal ref_koefs
-    task_size=100
-    steps=100*task_size
-    T=4.0
-    out_results=[selfref, "results.json"]
-    depends = pyobjhash([metropolis,teval,tsuggestX,stage_metropolis])
-    return mkconfig(locals())
-  def make(b:Build):
-    print('Running metropolis')
-    t=tload(b)
-    F=partial(teval,t=t)
-    G=partial(tsuggestX,t=t)
-    mr=metropolis(F=F,G=G,
-                    T=mklens(b).T.val,
-                    X_0=0,
-                    maxsteps=mklens(b).steps.val)
-    with open(mklens(b).out_results.syspath,'w') as f:
-      json_dump(mr.to_dict(),f,indent=4) # type: ignore
-  return mkdrv(config(), match_latest(), build_wrapper(make), r=r)
+@autostage(name='koefs',
+           index=0,
+           N=100,
+           scale=1,
+           out_ks=[selfref,'ks.npy'],
+           sourcedeps=[metropolis,teval,tsuggestX])
+def stage_koefs(build:Build,name,index,N,scale,out_ks):
+  print('Generating coeffs')
+  r=np.random.rand(N)
+  r-=0.5
+  r*=2*scale
+  np.save(out_ks,r)
 
 
-def stage_findT0(ref_metr:DRef, r:Registry):
-  def config():
-    nonlocal ref_metr
-    T0min=0.0001
-    T0max=1e6
-    factor=2
-    waitsteps=10
-    Paccept_tgt=0.99
-    out_T0 = [selfref, 'T0.npy']
-    depends = pyobjhash([metropolis,teval,tsuggestX,stage_findT0])
-    return mkconfig(locals())
-  def make(b:Build):
-    t=tload(mklens(b).ref_metr.rref)
-    F=partial(teval,t=t)
-    G=partial(tsuggestX,t=t)
-    T0i=float(mklens(b).T0min.val)
-    while T0i<mklens(b).T0max.val:
-      r=metropolis(F=F,G=G,T=T0i,X_0=0,maxsteps=mklens(b).waitsteps.val)
-      Paccept=np.mean(r.Ac)
-      print(f"T0i {T0i} Paccept {Paccept}")
-      if Paccept>=mklens(b).Paccept_tgt.val:
-        break
-      T0i*=mklens(b).factor.val
-    np.save(mklens(b).out_T0.syspath,T0i)
-  return mkdrv(config(), match_latest(), build_wrapper(make), r=r)
+task_size=100
+@autostage(name='metropolis',
+           ref_koefs=Placeholder(),
+           task_size=task_size,
+           steps=100*task_size,
+           T=4.0,out_results=[selfref,"results.json"],
+           sourcedeps=[metropolis,teval,tsuggestX])
+def stage_metropolis(name,build,ref_koefs,task_size,steps,T,out_results):
+  print('Running metropolis')
+  t=tload(build)
+  F=partial(teval,t=t)
+  G=partial(tsuggestX,t=t)
+  mr=metropolis(F=F,G=G, T=T,X_0=0,maxsteps=steps)
+  with open(out_results,'w') as f:
+    json_dump(mr.to_dict(),f,indent=4) # type: ignore
+
+
+@autostage(ref_metr=Placeholder(),T0min=0.0001,T0max=1e6,factor=2,
+           waitsteps=10,Paccept_tgt=0.99,out_T0=[selfref,'T0.npy'],
+           sourcedeps=[metropolis,teval,tsuggestX])
+def stage_findT0(build:Build,ref_metr,T0min,T0max,factor,
+                 waitsteps,Paccept_tgt,out_T0):
+  t=tload(ref_metr)
+  F=partial(teval,t=t)
+  G=partial(tsuggestX,t=t)
+  T0i=float(T0min)
+  while T0i<T0max:
+    r=metropolis(F=F,G=G,T=T0i,X_0=0,maxsteps=waitsteps)
+    Paccept=np.mean(r.Ac)
+    print(f"T0i {T0i} Paccept {Paccept}")
+    if Paccept>=Paccept_tgt:
+      break
+    T0i*=factor
+  np.save(out_T0,T0i)
 
 
 def same(l,rtol)->bool:
   return all(np.isclose(x,l[0],rtol=rtol) for x in l)
 
-def stage_annealing(ref_T0:DRef, r:Registry):
-  def config():
-    nonlocal ref_T0
-    decay = 0.85
-    rtol = 0.001
-    patience = 10
-    out_results = [selfref, 'results.json']
-    depends = pyobjhash([metropolis,teval,tsuggestX,stage_annealing])
-    v=3
-    return mkconfig(locals())
-  def make(b:Build):
-    T=np.load(mklens(b).ref_T0.out_T0.syspath)
-    t=tload(mklens(b).ref_T0.ref_metr.rref)
-    decay=mklens(b).decay.val
-    patience=mklens(b).patience.val
-    rtol=mklens(b).rtol.val
-    F=partial(teval,t=t)
-    G=partial(tsuggestX,t=t)
-    rs:List[MetropolisResults]=[]
-    while True:
-      print(f"T is {T}")
-      rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else 0,
-                           maxaccepts=t.size,
-                           maxsteps=10*t.size))
-      solutions=[r.Ys[-1] for r in rs[-patience:]]
-      if len(solutions)==patience and same(solutions,rtol):
-        break
-      with open(mklens(b).out_results.syspath,'w') as f:
-        json_dump([r.to_dict() for r in rs],f,indent=4) # type: ignore
-      T*=decay
-  return mkdrv(config(), match_latest(), build_wrapper(make), r=r)
+@autostage(ref_T0=Placeholder(),decay=0.85,rtol=0.001,patience=10,
+           out_results=[selfref,'results.json'],
+           sourcedeps=[metropolis,teval,tsuggestX],
+           name='annealing')
+def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,name):
+  T=np.load(mklens(build).ref_T0.out_T0.syspath)
+  t=tload(mklens(build).ref_T0.ref_metr.rref)
+  F=partial(teval,t=t)
+  G=partial(tsuggestX,t=t)
+  rs:List[MetropolisResults]=[]
+  while True:
+    print(f"T is {T}")
+    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else 0,
+                         maxaccepts=t.size,
+                         maxsteps=10*t.size))
+    solutions=[r.Ys[-1] for r in rs[-patience:]]
+    if len(solutions)==patience and same(solutions,rtol):
+      break
+    with open(out_results,'w') as f:
+      json_dump([r.to_dict() for r in rs],f,indent=4) # type: ignore
+    T*=decay
 
 
 def stage_experiment1(r:Registry):
-  ref_koefs=stage_koefs(0,r)
-  ref_metr=stage_metropolis(ref_koefs,r)
-  ref_T0=stage_findT0(ref_metr,r)
+  ref_koefs=stage_koefs(r)
+  ref_metr=stage_metropolis(ref_koefs=ref_koefs,r=r)
+  ref_T0=stage_findT0(ref_metr=ref_metr,r=r)
   return (ref_metr,ref_T0)
 
 def stage_experiment2(r:Registry):
-  ref_koefs=stage_koefs(0,r)
-  ref_metr=stage_metropolis(ref_koefs,r)
-  ref_T0=stage_findT0(ref_metr,r)
-  ref_ann=stage_annealing(ref_T0,r)
+  ref_koefs=stage_koefs(r)
+  ref_metr=stage_metropolis(ref_koefs=ref_koefs,r=r)
+  ref_T0=stage_findT0(ref_metr=ref_metr,r=r)
+  ref_ann=stage_annealing(ref_T0=ref_T0,r=r)
   return (ref_metr,ref_T0,ref_ann)
 
 #  ____

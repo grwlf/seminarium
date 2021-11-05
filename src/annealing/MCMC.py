@@ -64,14 +64,20 @@ def tflatten(t:Task, X:List[int])->int:
     k*=S
   return acc
 
-def tsuggestX_dim(X:List[int],t:Task,dim:int)->List[int]:
+def tsuggestX_dim(X:List[int],t:Task,maxattempts:int=100)->List[int]:
+  dim=len(X)
   S=tsize(t,dim)
+  x1=tflatten(t,X)
+  if x1>=t.size:
+    X=[0]*dim
   while True:
-    X2=np.array(X)+np_choice([1,-1],size=(dim,))
+    X2=np.array(X)+np_choice([1,0,-1],size=(dim,))
+    for j in range(len(X2)):
+      if X2[j]<0:
+        X2[j]=S-1
     x2=tflatten(t,X2)
-    if x2>=0 and x2<t.size:
-      break
-  return X2.tolist()
+    if x2!=x1 and x2>=0 and x2<t.size:
+      return X2.tolist()
 
 def teval_dim(xs:List[int],t:Task)->float:
   """ A random function to find the minimum of """
@@ -172,7 +178,7 @@ def stage_findT0(build:Build,ref_koef,T0min,T0max,factor,
                  out_stepsused):
   t=tload(ref_koef._rref)
   F=partial(teval_dim,t=t)
-  G=partial(tsuggestX_dim,t=t,dim=dim)
+  G=partial(tsuggestX_dim,t=t)
   T0i=float(T0min)
   T0e=None
   nsteps=0
@@ -203,9 +209,10 @@ def same(l,rtol)->bool:
            sourcedeps=[metropolis,teval,tsuggestX],
            maxaccepts=100,
            maxsteps=None,
-           name='annealing')
+           name='annealing',
+           nouts=10)
 def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,
-                    name,maxsteps,maxaccepts):
+                    name,maxsteps,maxaccepts,rindex):
   T=float(np.load(ref_T0.out_T0))
   assert T>0.0, f"T0={T}<=0.0 ??"
   T1=np.load(ref_T0.out_T1)
@@ -216,8 +223,9 @@ def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,
   budget=task_size-np.load(ref_T0.out_stepsused)
   assert budget>0, f"{budget}<=0 ??"
   dim=ref_T0.dim
+  X0=np_choice(range(int(task_size**(1/dim))),size=(dim,)).tolist()
   F=partial(teval_dim,t=t)
-  G=partial(tsuggestX_dim,t=t,dim=dim)
+  G=partial(tsuggestX_dim,t=t)
   rs:List[MetropolisResults[List[int]]]=[]
   while True:
     maxloops=log(T1/T,decay)
@@ -225,7 +233,7 @@ def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,
       break
     maxsteps=int(budget/maxloops) # Maxsteps per T
     assert maxsteps>0, f"{maxsteps}<=0 ??"
-    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else [0]*dim,
+    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else X0,
                          maxaccepts=maxaccepts2,
                          maxsteps=maxsteps))
     nsteps=sum(len(r.Xs) for r in rs)
@@ -242,11 +250,34 @@ def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,
     T*=decay
     budget-=len(rs[-1].Xs)
 
+@dataclass_json
+@dataclass
+class AnnealingResult:
+  Xs:Tuple[float,float]
+  Ys:Tuple[float,float]
+  mean_budget:float
+
+@autostage(name='results', out_results=[selfref,'results.npy'])
+def stage_results(build:Build,ref_ann,name,out_results,always_multiref=True):
+  t:Task=tload(mklens(ref_ann[0]._rref).ref_T0.ref_koef.rref)
+  Xs=[]; Ys=[]; budgets=[]
+  for a in ref_ann:
+    with open(a.out_results) as f:
+      rs=[MetropolisResults[List[int]].from_dict(x) for x in json_load(f)] # type: ignore
+    Xs.append(rs[-1].Xs[-1])
+    Ys.append(rs[-1].Ys[-1])
+    budgets.append(sum([len(r.Xs) for r in rs]))
+  writejson(out_results,AnnealingResult((float(np.mean(Xs)),float(np.std(Xs))),
+                                        (float(np.mean(Ys)),float(np.std(Ys))),
+                                        float(np.mean(budgets))).to_dict())
+
+
 def stage_experiment2(r:Registry):
   ref_koef=stage_koef(r)
   ref_T0=stage_findT0(ref_koef=ref_koef,r=r)
   ref_ann=stage_annealing(ref_T0=ref_T0,r=r)
-  return (ref_koef,ref_T0,ref_ann)
+  ref_res=stage_results(ref_ann=ref_ann,r=r)
+  return (ref_koef,ref_T0,ref_ann,ref_res)
 
 #  ____
 # |  _ \ _   _ _ __  _ __   ___ _ __ ___
@@ -256,9 +287,34 @@ def stage_experiment2(r:Registry):
 #
 
 def runA(force=False)->RRef:
-  (_,_,rAnn),clo,ctx=realize(instantiate(stage_experiment2),force_rebuild=force)
-  assert isinstance(rAnn,DRef)
-  return ctx[rAnn][0]
+  (_,_,rAnn,rRes),clo,ctx=realize(instantiate(stage_experiment2),
+                               force_rebuild=force)
+  assert isinstance(rRes,DRef)
+  return ctx[rRes][0]
+
+
+def run2(force=False)->None:
+  r=Registry()
+  acc:list=[]
+  # dims=[1,2,3,4,5,6,7,8,9,10]
+  # dims=[10]
+  dims=[11,12,13,14,15]
+  for dim in dims:
+    print(f"dim {dim}")
+    ref_koef=stage_koef(r)
+    ref_T0=stage_findT0(ref_koef=ref_koef,r=r,dim=dim)
+    ref_ann=stage_annealing(ref_T0=ref_T0,r=r)
+    ref_res=stage_results(ref_ann=ref_ann,r=r)
+
+    rRes,clo,ctx=realize(instantiate(ref_res,r=r),force_rebuild=force)
+    assert isinstance(rRes,DRef)
+    with open(mklens(ctx[rRes][0]).out_results.syspath) as f:
+      acc.append(AnnealingResult.from_dict(json_load(f)))
+  fig,(Ys)=subplots(1)
+  Ys.plot(dims,[r.Ys[0] for r in acc],label='F')
+  kshow()
+  plt.close()
+
 
 # ref_ann=runA()
 

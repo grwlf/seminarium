@@ -8,7 +8,7 @@ from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
 
 import numpy as np
 from numpy.random import seed as np_seed, choice as np_choice
-from math import sin, exp
+from math import sin, exp, ceil, log
 from typing import (Any, Optional, Union, Callable, List, Tuple, TypeVar,
                     Generic)
 from functools import partial
@@ -20,7 +20,6 @@ from itertools import chain
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import plot, hist, subplots
 from dataclasses_json import dataclass_json
-from math import ceil
 
 from reports.lib import kshow
 from reports.lib import *
@@ -91,6 +90,7 @@ class MetropolisResults(Generic[V]):
   Ys:List[float]
   Ps:List[float]
   Ac:List[int]
+  T:float
 
 
 
@@ -129,7 +129,7 @@ def metropolis(F:Callable[[V],float],
     Ac.append(1 if accept else 0)
     naccepts+=1 if accept else 0
     step+=1
-  return MetropolisResults(Xs,Ys,Ps,Ac)
+  return MetropolisResults(Xs,Ys,Ps,Ac,T)
 
 
 #  ____  _
@@ -140,7 +140,7 @@ def metropolis(F:Callable[[V],float],
 #                |___/
 
 
-TASK_SIZE=100
+TASK_SIZE=10000
 @autostage(name='koefs',
            index=0,
            N=100,
@@ -159,52 +159,88 @@ def stage_koef(build:Build,name,index,N,scale,out_ks,task_size):
 @autostage(T0min=0.0001,
            T0max=1e6,
            factor=2,
-           waitsteps=10,
+           waitsteps=100,
            Paccept_tgt=0.99,
+           Paccept_sol=0.01,
            out_T0=[selfref,'T0.npy'],
+           out_T1=[selfref,'T1.npy'],
+           out_stepsused=[selfref,'stepsused.npy'],
            dim=4,
            sourcedeps=[metropolis,teval,tsuggestX])
 def stage_findT0(build:Build,ref_koef,T0min,T0max,factor,
-                 waitsteps,Paccept_tgt,out_T0,dim):
+                 waitsteps,Paccept_tgt,out_T0,dim,Paccept_sol,out_T1,
+                 out_stepsused):
   t=tload(ref_koef._rref)
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   T0i=float(T0min)
+  T0e=None
+  nsteps=0
   while T0i<T0max:
     r=metropolis(F=F,G=G,T=T0i,X_0=[0]*dim,maxsteps=waitsteps)
-    Paccept=np.mean(r.Ac)
-    print(f"T0i {T0i} Paccept {Paccept}")
+    Paccept=sum(ac for ac in r.Ac if ac>0)/len(r.Ac)
+    print(f"T0e {T0e} T0i {T0i} Paccept {Paccept}")
     if Paccept>=Paccept_tgt:
       break
+    if Paccept>=Paccept_sol and T0e is None:
+      T0e=T0i
     T0i*=factor
+    nsteps+=waitsteps
+  assert T0e is not None
+  np.save(out_T1,T0e)
   np.save(out_T0,T0i)
+  np.save(out_stepsused,nsteps)
+  print(f"Used {nsteps}")
 
 
 def same(l,rtol)->bool:
   return all(np.isclose(x,l[0],rtol=rtol) for x in l)
 
-@autostage(decay=0.85,rtol=0.001,patience=10,
+@autostage(decay=0.7,
+           rtol=0.001,
+           patience=10,
            out_results=[selfref,'results.json'],
            sourcedeps=[metropolis,teval,tsuggestX],
+           maxaccepts=100,
+           maxsteps=None,
            name='annealing')
-def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,name):
-  T=np.load(ref_T0.out_T0)
+def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,
+                    name,maxsteps,maxaccepts):
+  T=float(np.load(ref_T0.out_T0))
+  assert T>0.0, f"T0={T}<=0.0 ??"
+  T1=np.load(ref_T0.out_T1)
+  assert T1>0.0, f"T1={T1}<=0.0 ??"
   t=tload(ref_T0.ref_koef._rref)
+  maxaccepts2=t.size if maxaccepts is None else maxaccepts
+  task_size=ref_T0.ref_koef.task_size
+  budget=task_size-np.load(ref_T0.out_stepsused)
+  assert budget>0, f"{budget}<=0 ??"
   dim=ref_T0.dim
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   rs:List[MetropolisResults[List[int]]]=[]
   while True:
-    print(f"T is {T}")
+    maxloops=log(T1/T,decay)
+    if budget<=0 or maxloops<=0:
+      break
+    maxsteps=int(budget/maxloops) # Maxsteps per T
+    assert maxsteps>0, f"{maxsteps}<=0 ??"
     rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else [0]*dim,
-                         maxaccepts=t.size,
-                         maxsteps=10*t.size))
+                         maxaccepts=maxaccepts2,
+                         maxsteps=maxsteps))
+    nsteps=sum(len(r.Xs) for r in rs)
+    print(f"T {T} nsteps {nsteps} budget {budget} maxloops {maxloops} maxsteps {maxsteps}")
     solutions=[r.Ys[-1] for r in rs[-patience:]]
     if len(solutions)==patience and same(solutions,rtol):
       break
     with open(out_results,'w') as f:
-      json_dump([r.to_dict() for r in rs],f,indent=4) # type: ignore
+      acc=[]
+      for r in rs:
+        dd=r.to_dict() # type: ignore
+        acc.append(dd)
+      json_dump(acc,f,indent=4)
     T*=decay
+    budget-=len(rs[-1].Xs)
 
 def stage_experiment2(r:Registry):
   ref_koef=stage_koef(r)
@@ -224,10 +260,10 @@ def runA(force=False)->RRef:
   assert isinstance(rAnn,DRef)
   return ctx[rAnn][0]
 
-ref_ann=runA()
+# ref_ann=runA()
 
 
-def plotsA(rref:RRef=ref_ann):
+def plotsA(rref:RRef):
   t:Task=tload(mklens(rref).ref_T0.ref_koef.rref)
   with open(mklens(rref).out_results.syspath) as f:
     rs=[MetropolisResults[List[int]].from_dict(x) for x in json_load(f)] # type: ignore
@@ -243,6 +279,7 @@ def plotsA(rref:RRef=ref_ann):
   fig.legend()
   kshow()
   plt.close()
+  print(f"len(Xs)={len(allXs)}")
   print(f"Result: X={allXs[-1]} Y={allYs[-1]}")
 
 

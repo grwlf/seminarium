@@ -4,7 +4,7 @@ from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
                         match_only, build_wrapper, writejson, readjson,
                         writestr, filehash, shell, pyobjhash, realize,
-                        match_latest, autostage, Placeholder)
+                        match_latest, autostage, fsinit)
 
 import numpy as np
 from numpy.random import seed as np_seed, choice as np_choice
@@ -26,7 +26,7 @@ from reports.lib import kshow
 from reports.lib import *
 
 plt.style.use('dark_background')
-
+fsinit('_pylightnix',use_as_default=True)
 
 @dataclass_json
 @dataclass
@@ -158,7 +158,6 @@ def stage_koefs(build:Build,name,index,N,scale,out_ks):
 
 task_size=100
 @autostage(name='metropolis',
-           ref_koefs=Placeholder(),
            task_size=task_size,
            steps=100*task_size,
            T=4.0,out_results=[selfref,"results.json"],
@@ -174,13 +173,13 @@ def stage_metropolis(name,build,ref_koefs,task_size,steps,T,out_results,dim):
     json_dump(mr.to_dict(),f,indent=4) # type: ignore
 
 
-@autostage(ref_metr=Placeholder(),T0min=0.0001,T0max=1e6,factor=2,
+@autostage(T0min=0.0001,T0max=1e6,factor=2,
            waitsteps=10,Paccept_tgt=0.99,out_T0=[selfref,'T0.npy'],
            sourcedeps=[metropolis,teval,tsuggestX])
 def stage_findT0(build:Build,ref_metr,T0min,T0max,factor,
                  waitsteps,Paccept_tgt,out_T0):
-  t=tload(ref_metr)
-  dim=mklens(ref_metr).dim.val
+  t=tload(ref_metr._rref)
+  dim=ref_metr.dim
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   T0i=float(T0min)
@@ -197,14 +196,14 @@ def stage_findT0(build:Build,ref_metr,T0min,T0max,factor,
 def same(l,rtol)->bool:
   return all(np.isclose(x,l[0],rtol=rtol) for x in l)
 
-@autostage(ref_T0=Placeholder(),decay=0.85,rtol=0.001,patience=10,
+@autostage(decay=0.85,rtol=0.001,patience=10,
            out_results=[selfref,'results.json'],
            sourcedeps=[metropolis,teval,tsuggestX],
            name='annealing')
 def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,name):
   T=np.load(mklens(build).ref_T0.out_T0.syspath)
   t=tload(mklens(build).ref_T0.ref_metr.rref)
-  dim=mklens(build).ref_T0.ref_metr.dim.val
+  dim=ref_T0.ref_metr.dim
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   rs:List[MetropolisResults[List[int]]]=[]

@@ -80,6 +80,7 @@ let
           hypothesis
           pytest
           pytest-mypy
+          pytest_xdist
           coverage
           codebraid
           pyls

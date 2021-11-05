@@ -35,9 +35,7 @@ class Task:
   ks:List[float]
 
 def tload(ref:Union[RRef,Build])->Task:
-  return Task(
-    mklens(ref).task_size.val,
-    np.load(mklens(ref).ref_koefs.out_ks.syspath))
+  return Task(mklens(ref).task_size.val,np.load(mklens(ref).out_ks.syspath))
 
 def teval(x:int,t:Task)->float:
   """ A random function to find the minimum of """
@@ -142,13 +140,15 @@ def metropolis(F:Callable[[V],float],
 #                |___/
 
 
+TASK_SIZE=100
 @autostage(name='koefs',
            index=0,
            N=100,
            scale=1,
+           task_size=TASK_SIZE,
            out_ks=[selfref,'ks.npy'],
            sourcedeps=[metropolis,teval,tsuggestX])
-def stage_koefs(build:Build,name,index,N,scale,out_ks):
+def stage_koef(build:Build,name,index,N,scale,out_ks,task_size):
   print('Generating coeffs')
   r=np.random.rand(N)
   r-=0.5
@@ -156,30 +156,17 @@ def stage_koefs(build:Build,name,index,N,scale,out_ks):
   np.save(out_ks,r)
 
 
-task_size=100
-@autostage(name='metropolis',
-           task_size=task_size,
-           steps=100*task_size,
-           T=4.0,out_results=[selfref,"results.json"],
+@autostage(T0min=0.0001,
+           T0max=1e6,
+           factor=2,
+           waitsteps=10,
+           Paccept_tgt=0.99,
+           out_T0=[selfref,'T0.npy'],
            dim=4,
            sourcedeps=[metropolis,teval,tsuggestX])
-def stage_metropolis(name,build,ref_koefs,task_size,steps,T,out_results,dim):
-  print('Running metropolis')
-  t=tload(build)
-  F=partial(teval_dim,t=t)
-  G=partial(tsuggestX_dim,t=t,dim=dim)
-  mr=metropolis(F=F,G=G, T=T,X_0=[0]*dim,maxsteps=steps)
-  with open(out_results,'w') as f:
-    json_dump(mr.to_dict(),f,indent=4) # type: ignore
-
-
-@autostage(T0min=0.0001,T0max=1e6,factor=2,
-           waitsteps=10,Paccept_tgt=0.99,out_T0=[selfref,'T0.npy'],
-           sourcedeps=[metropolis,teval,tsuggestX])
-def stage_findT0(build:Build,ref_metr,T0min,T0max,factor,
-                 waitsteps,Paccept_tgt,out_T0):
-  t=tload(ref_metr._rref)
-  dim=ref_metr.dim
+def stage_findT0(build:Build,ref_koef,T0min,T0max,factor,
+                 waitsteps,Paccept_tgt,out_T0,dim):
+  t=tload(ref_koef._rref)
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   T0i=float(T0min)
@@ -201,9 +188,9 @@ def same(l,rtol)->bool:
            sourcedeps=[metropolis,teval,tsuggestX],
            name='annealing')
 def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,name):
-  T=np.load(mklens(build).ref_T0.out_T0.syspath)
-  t=tload(mklens(build).ref_T0.ref_metr.rref)
-  dim=ref_T0.ref_metr.dim
+  T=np.load(ref_T0.out_T0)
+  t=tload(ref_T0.ref_koef._rref)
+  dim=ref_T0.dim
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t,dim=dim)
   rs:List[MetropolisResults[List[int]]]=[]
@@ -219,19 +206,11 @@ def stage_annealing(build:Build,ref_T0,decay,rtol,patience,out_results,name):
       json_dump([r.to_dict() for r in rs],f,indent=4) # type: ignore
     T*=decay
 
-
-def stage_experiment1(r:Registry):
-  ref_koefs=stage_koefs(r)
-  ref_metr=stage_metropolis(ref_koefs=ref_koefs,r=r)
-  ref_T0=stage_findT0(ref_metr=ref_metr,r=r)
-  return (ref_metr,ref_T0)
-
 def stage_experiment2(r:Registry):
-  ref_koefs=stage_koefs(r)
-  ref_metr=stage_metropolis(ref_koefs=ref_koefs,r=r)
-  ref_T0=stage_findT0(ref_metr=ref_metr,r=r)
+  ref_koef=stage_koef(r)
+  ref_T0=stage_findT0(ref_koef=ref_koef,r=r)
   ref_ann=stage_annealing(ref_T0=ref_T0,r=r)
-  return (ref_metr,ref_T0,ref_ann)
+  return (ref_koef,ref_T0,ref_ann)
 
 #  ____
 # |  _ \ _   _ _ __  _ __   ___ _ __ ___
@@ -240,41 +219,16 @@ def stage_experiment2(r:Registry):
 # |_| \_\\__,_|_| |_|_| |_|\___|_|  |___/
 #
 
-def run()->Tuple[RRef,RRef,MetropolisResults[int]]:
-  (r,rT0),clo,ctx=realize(instantiate(stage_experiment1))
-  assert isinstance(r,DRef)
-  assert isinstance(rT0,DRef)
-  with open(mklens(ctx[r][0]).out_results.syspath) as f:
-    mr=MetropolisResults.from_dict(json_load(f)) # type: ignore
-  return (ctx[r][0],ctx[rT0][0],mr)
-
-curref,curT0,curmr=run()
-print(f'T0[dim={mklens(curT0).ref_metr.dim.val}] =',np.load(mklens(curT0).out_T0.syspath))
-
 def runA(force=False)->RRef:
   (_,_,rAnn),clo,ctx=realize(instantiate(stage_experiment2),force_rebuild=force)
   assert isinstance(rAnn,DRef)
   return ctx[rAnn][0]
 
-
-def plots(rref=curref,mr=curmr):
-  t:Task=tload(rref)
-  allXs=np.arange(0,t.size-1)
-  Ys=list(map(lambda x:teval(x,t),allXs))
-  Xs1=[teval_dim(x,t) for x in mr.Xs]
-  print('here')
-  fig,(axF,axXs,ax1,ax2)=subplots(4)
-  axF.plot(allXs,Ys,label='F')
-  axXs.plot(Xs1,'.',color='red',label='X(time)')
-  ax1.hist(Xs1,label='Visited X')
-  ax2.hist(mr.Ys,color='orange',label='Visited Y')
-  fig.legend()
-  kshow()
-  plt.close()
+ref_ann=runA()
 
 
-def plotsA(rref:RRef):
-  t:Task=tload(mklens(rref).ref_T0.ref_metr.rref)
+def plotsA(rref:RRef=ref_ann):
+  t:Task=tload(mklens(rref).ref_T0.ref_koef.rref)
   with open(mklens(rref).out_results.syspath) as f:
     rs=[MetropolisResults[List[int]].from_dict(x) for x in json_load(f)] # type: ignore
   fXs=np.arange(0,t.size-1)

@@ -1,0 +1,65 @@
+
+```{.python .cb.nb show=none, live_output=true}
+from annealing.MCMC import *
+from reports.lib import *
+import matplotlib.pyplot as plt
+plt.style.use('classic')
+```
+
+
+
+```{.python .cb.code
+    include_file=MCMC.py
+    include_start_regex="def metropolis"
+    include_before_regex="^$\n\n"}
+```
+
+Annealing, single run
+---------------------
+
+```{.python .cb.nb show=stdout:raw}
+with markdown_image("1") as p:
+  runA(pngfile=p)
+```
+
+
+Annealing, dimentionality test
+------------------------------
+
+The algorithm:
+
+1. Generate a random "sin-smile" function
+2. For dim in [1..10] do
+   - Find the minimum of the function `R^dim -> R` be annealing, write down
+     the number of steps used.
+   - Search the minimum of the same function using the brute-force search with
+     the same number of steps.
+   - Repeat 10 times
+3. Plot the comparison results.
+
+### Smaller task
+
+TASK_SIZE=`TASK_SIZE`{.python .cb.expr}
+
+```{.python .cb.nb show=stdout:raw}
+with markdown_image("2") as p:
+  run2(pngfile=p, task_size=TASK_SIZE)
+```
+
+### Larger task
+
+TASK_SIZE=`10*TASK_SIZE`{.python .cb.expr}
+
+```{.python .cb.nb show=stdout:raw}
+with markdown_image("3") as p:
+  run2(pngfile=p, task_size=10*TASK_SIZE)
+```
+
+### Even larger task
+
+TASK_SIZE=`100*TASK_SIZE`{.python .cb.expr}
+
+```{.python .cb.nb show=stdout:raw}
+with markdown_image("4") as p:
+  run2(pngfile=p, task_size=100*TASK_SIZE)
+```

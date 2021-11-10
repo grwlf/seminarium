@@ -342,7 +342,7 @@ def stage_bruteforce(build:Build,ref_koef,name,out_results,out_rindex,
 # |_| \_\\__,_|_| |_|_| |_|\___|_|  |___/
 #
 
-def runA(force=False,dim=10,task_size=TASK_SIZE,view=0)->None:
+def runA(force=False,dim=10,task_size=TASK_SIZE,view=0,pngfile=None)->None:
   r=Registry()
   ref_koef=stage_koef(r,task_size=task_size)
   ref_T0=stage_findT0(ref_koef=ref_koef,r=r,dim=dim,
@@ -365,12 +365,15 @@ def runA(force=False,dim=10,task_size=TASK_SIZE,view=0)->None:
   ax1.hist(allXs,label='Visited X')
   ax2.hist(allYs,color='orange',label='Visited Y')
   fig.legend()
-  kshow()
+  if pngfile is None:
+    kshow()
+  else:
+    plt.savefig(pngfile)
   plt.close()
   print(f"len(Xs)={len(allXs)}")
   print(f"Result: X={allXs[-1]} Y={allYs[-1]}")
 
-def run2(force=False,task_size=TASK_SIZE)->None:
+def run2(force=False,task_size=TASK_SIZE,pngfile=None)->None:
   acc:list=[]
   bf_mean:list=[]; bf_std:list=[]; ann_budgets:list=[]
   dims=list(range(10))[1:]
@@ -409,7 +412,10 @@ def run2(force=False,task_size=TASK_SIZE)->None:
   Aperf.plot(dims,bf_mean,color='blue',label='bf')
   Aperf.fill_between(dims,bf_mean_a-bf_std_a,bf_mean_a+bf_std_a,alpha=0.5)
   Abudget.plot(dims,ann_budgets)
-  kshow()
+  if pngfile is None:
+    kshow()
+  else:
+    plt.savefig(pngfile)
   plt.close()
 
 def runGC()->None:

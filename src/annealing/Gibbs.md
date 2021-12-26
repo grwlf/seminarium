@@ -23,7 +23,7 @@ def tPideal(t:Task,T:float=1)->PDist:
   Z=0.0
   ps=np.zeros(2**sz)
   for i in range(2**sz):
-    v=np.array(i2bits(i,nbits=sz))
+    v=np.array([(1 if b>0 else -1) for b in i2bits(i,nbits=sz)])
     p=exp(-tenergy(t,v)/T)
     Z+=p
     ps[i]=p
@@ -47,8 +47,8 @@ def gibbsPI(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->Iterator[PDist]:
       for i in range(sz):
         if i!=j:
           s+=t.weights[i,j]*v[i]
-      P1=sigmoid((1/T)*s)
-      v[j]=np_choice([1,0],p=[P1,1.0-P1])
+      P1=sigmoid((2/T)*s)
+      v[j]=np_choice([1,-1],p=[P1,1.0-P1])
     ps[vstamp(v)]+=1
     step+=1
     if step%100==0:
@@ -58,7 +58,20 @@ def gibbsPI(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->Iterator[PDist]:
 Comparing the results using KL-divergence
 
 ``` python
-png2md(mklens(run()).out.syspath)
+@autostage(name='plotKL',T=1.0,out=[selfref,'out.png'],
+           sourcedeps=[gibbsPI, tPideal])
+def stage_plotKL(build:Build,name,reft,out,T=1.0):
+  t=tload(reft.out)
+  pd1=tPideal(t,T)
+  acc=[]
+  for pd2 in gibbsPI(t,T,maxsteps=100*1024):
+    kl=KL(pd1.pdf,pd2.pdf)
+    acc.append(kl)
+  plt.close()
+  plt.style.use('default')
+  plt.plot(acc,label='KL-dvg')
+  plt.grid()
+  plt.savefig(out)
 ```
 
-![](img/7998824982271022323.png)
+![](img/2893561013825138459.png)

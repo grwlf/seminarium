@@ -17,6 +17,7 @@ from json import dump as json_dump, load as json_load, loads as json_loads
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain
+from os.path import join, dirname
 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import plot, hist, subplots
@@ -28,8 +29,7 @@ from reports.lib import *
 from utils.math import bits2i, sigmoid, i2bits
 
 plt.style.use('dark_background')
-fsinit('_pylightnix',use_as_default=True)
-
+fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
 
 @dataclass_json
 @dataclass
@@ -172,7 +172,7 @@ def stage_plotKL(build:Build,name,reft,out,T=1.0):
   plt.plot(acc,label='KL-dvg')
   plt.grid()
   plt.savefig(out)
-  # kittyshow()
+
 
 def run():
   with current_registry(mkregistry()) as r:

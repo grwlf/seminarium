@@ -45,7 +45,7 @@ def metropolis(F:Callable[[V],float],
 
 ## Annealing, single run
 
-len(Xs)=2771 Result: X=5900 Y=-15.470267369982917 ![](img/1.png)
+len(Xs)=2666 Result: X=5999 Y=-17.03025928547614 ![](img/1.png)
 
 ## Annealing, dimentionality test
 

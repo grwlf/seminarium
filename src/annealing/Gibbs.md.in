@@ -2,7 +2,7 @@ Botlzmann machines
 ==================
 
 ```{.python .cb.nb show=none, live_output=true}
-from boltzmann.Gibbs import *
+from annealing.Gibbs import *
 from reports.lib import *
 import matplotlib.pyplot as plt
 plt.style.use('classic')
@@ -40,6 +40,12 @@ sampler.
 
 Comparing the results using KL-divergence
 
-```{.python .cb.nb show=code+stdout:raw}
+```{.python .cb.code
+    include_file=Gibbs.py
+    include_start_regex=".autostage.name=.plotKL."
+    include_before_regex="^$\n\n"}
+```
+
+```{.python .cb.nb show=stdout:raw}
 png2md(mklens(run()).out.syspath)
 ```

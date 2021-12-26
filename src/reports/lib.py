@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from subprocess import call, DEVNULL
 from shutil import copyfile
 from typing import Optional
+from sympy import latex as sympy_latex
+from shutil import move
 
 # Altair
 from altair_saver import save as altair_save
@@ -15,7 +17,7 @@ from altair_saver import save as altair_save
 from pylightnix import (Registry, Config, Build, DRef, RRef, realize,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
                         match_only, build_wrapper, writejson, readjson,
-                        writestr, fsinit, realize1)
+                        writestr, fsinit, realize1, Path, filehash)
 
 fsinit()
 
@@ -134,6 +136,38 @@ def kittyshow():
 
 kshow=kittyshow
 
+def imagepath(name:str, ext:str='.png')->str:
+  assert name is not None
+  if not name.endswith(ext):
+    name+=ext
+  fn:Filepath=osjoin(IMGDIR,name)
+  makedirs(IMGDIR, exist_ok=True)
+  return fn
+
+def latex2md(latex_expr, **kwargs)->None:
+  with markdown_image(str(abs(hash(str(latex_expr))))) as p:
+    latex2png(latex_expr, p, font='Large', **kwargs)
+
+
+def sympy2md(sympy_expr, **kwargs)->None:
+  with markdown_image(str(abs(hash(str(sympy_expr))))) as p:
+    latex2png(sympy_latex(sympy_expr), p, font='Large', **kwargs)
+
+def png2md(path:str)->None:
+  name=f"{str(abs(hash(path)))}.png"
+  with markdown_image(name) as p:
+    copyfile(path, p)
+
+def tmppng2md(path:str)->None:
+  name=f"{str(filehash(Path(path)))}.png"
+  with markdown_image(name) as p:
+    move(path, p)
+
+def plt2md()->None:
+  ptmp=imagepath('_tmp.png')
+  plt.savefig(ptmp,transparent=True)
+  with markdown_image(filehash(Path(ptmp))) as p:
+    copyfile(ptmp, p)
 
 
 

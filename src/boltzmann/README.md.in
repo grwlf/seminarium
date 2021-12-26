@@ -1,6 +1,12 @@
 Botlzmann machines
 ==================
 
+```{.python .cb.nb show=none, live_output=true}
+from boltzmann.Gibbs import *
+from reports.lib import *
+import matplotlib.pyplot as plt
+plt.style.use('classic')
+```
 
 Resources
 ---------
@@ -8,3 +14,32 @@ Resources
 * https://medium.com/machine-learning-researcher/boltzmann-machine-c2ce76d94da5
 * https://towardsdatascience.com/restricted-boltzmann-machine-how-to-create-a-recommendation-system-for-movie-review-45599a406deb
 * With MNIST https://www.pyimagesearch.com/2014/06/23/applying-deep-learning-rbm-mnist-using-python/
+
+
+
+Comparing ideal and Gibbs-sampled distributions
+-----------------------------------------------
+
+Calculating the Gibbs distribution in a brute-force manner
+
+```{.python .cb.code
+    include_file=Gibbs.py
+    include_start_regex="def tPideal"
+    include_before_regex="^$\n\n"}
+```
+
+Callculating an approximation to the same Gibbs distribution using Gibbs
+sampler.
+
+
+```{.python .cb.code
+    include_file=Gibbs.py
+    include_start_regex="def gibbsPI"
+    include_before_regex="^$\n\n"}
+```
+
+Comparing the results using KL-divergence
+
+```{.python .cb.nb show=code+stdout:raw}
+png2md(mklens(run()).out.syspath)
+```

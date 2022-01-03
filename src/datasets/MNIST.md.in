@@ -1,0 +1,16 @@
+```{.python .cb.nb show=none, live_output=true}
+from datasets.mnist import *
+from reports.lib import *
+import matplotlib.pyplot as plt
+plt.style.use('classic')
+```
+
+```{.python .cb.nb show=stdout:raw}
+a=realizeU(instantiate(stage_mnist_plot))
+png2md(a.out)
+```
+
+```{.python .cb.nb show=stdout:raw}
+b=realizeU(instantiate(stage_bwmnist_plot))
+png2md(b.out)
+```

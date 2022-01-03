@@ -19,7 +19,7 @@ Resources
   - Rosenthal
 
 * https://jwmi.github.io/BMS/chapter6-gibbs-sampling.pdf
-  - Chapter 6 of unknown book
+  - Chapter 6 of unknown book with lots of examples
 
 * https://ocw.mit.edu/courses/economics/14-384-time-series-analysis-fall-2013/lecture-notes/MIT14_384F13_lec26.pdf
   - Lecture 26. MCMC: Gibbs Sampling
@@ -44,6 +44,7 @@ Resources
   - Boltzmann Machines
   - 2007.03.25
   - Hinton
+  - A shallow description of Boltzmann machine's principles
 
 ### Others
 
@@ -80,5 +81,5 @@ Comparing the results using KL-divergence
 ```
 
 ```{.python .cb.nb show=stdout:raw}
-png2md(mklens(run()).out.syspath)
+png2md(run().out)
 ```

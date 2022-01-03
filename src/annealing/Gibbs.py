@@ -3,7 +3,7 @@ from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         match_only, build_wrapper, writejson, readjson,
                         writestr, filehash, shell, pyobjhash, realize,
                         match_latest, autostage, autostage_, fsinit, store_gc,
-                        rmref, current_registry, mkregistry)
+                        rmref, current_registry, mkregistry, realizeU)
 
 import numpy as np
 import numpy.random
@@ -178,6 +178,6 @@ def run():
   with current_registry(mkregistry()) as r:
     reft=stage_gibbstask()
     refp=stage_plotKL(reft=reft)
-    return realize1(instantiate(refp))
+    return realizeU(instantiate(refp))
 
 

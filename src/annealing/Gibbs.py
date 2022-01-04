@@ -110,7 +110,7 @@ def mkpdist(ps:np.ndarray)->PDist:
   assert_allclose(sum(ps),1.0)
   return PDist(ps)
 
-def tPideal(t:Task,T:float=1)->PDist:
+def gibbsPD_ideal(t:Task,T:float=1)->PDist:
   sz=tisize(t)
   assert sz<=10, f"Are you crazy?"
   Z=0.0
@@ -123,11 +123,13 @@ def tPideal(t:Task,T:float=1)->PDist:
   return mkpdist(ps/Z)
 
 
-def gibbsPI(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->Iterator[PDist]:
+def gibbsP(t:Task,
+           T:float=1.0,
+           maxsteps:Optional[int]=100
+           )->Iterator[np.ndarray]:
   sz=tisize(t)
   v=np.zeros(shape=(sz,),dtype=int)
   step=0
-  ps=np.zeros(2**sz)
   while True:
     if maxsteps is not None and step>=maxsteps:
       break
@@ -138,10 +140,19 @@ def gibbsPI(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->Iterator[PDist]:
           s+=t.weights[i,j]*v[i]
       P1=sigmoid((2/T)*s)
       v[j]=np_choice([1,-1],p=[P1,1.0-P1])
-    ps[vstamp(v)]+=1
+    yield v
     step+=1
-    if step%100==0:
-      yield mkpdist(ps/step)
+
+
+def stat_PD(t:Task, gen:Iterator[np.ndarray])->Iterator[PDist]:
+  sz=tisize(t)
+  ps=np.zeros(2**sz)
+  step=0
+  for v in gen:
+    ps[vstamp(v)]+=1
+    if step>0 and step%100==0:
+      yield mkpdist(ps/(step+1))
+    step+=1
 
 
 def KL(a, b):
@@ -159,18 +170,21 @@ def stage_gibbstask(build:Build,name,sz,out):
 
 
 @autostage(name='plotKL',T=1.0,out=[selfref,'out.png'],
-           sourcedeps=[gibbsPI, tPideal])
+           sourcedeps=[gibbsP,stat_PD,gibbsPD_ideal])
 def stage_plotKL(build:Build,name,reft,out,T=1.0):
   t=tload(reft.out)
-  pd1=tPideal(t,T)
+  pd1=gibbsPD_ideal(t,T)
   acc=[]
-  for pd2 in gibbsPI(t,T,maxsteps=100*1024):
+  for pd2 in stat_PD(t,gibbsP(t,T,maxsteps=100*1024)):
     kl=KL(pd1.pdf,pd2.pdf)
     acc.append(kl)
+  assert kl<0.001
   plt.close()
   plt.style.use('default')
-  plt.plot(acc,label='KL-dvg')
+  plt.plot(acc,label='KL-divirgence')
   plt.grid()
+  plt.legend()
+  plt.gca().set_xlabel('#samples*100')
   plt.savefig(out)
 
 

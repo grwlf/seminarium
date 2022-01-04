@@ -19,7 +19,7 @@
     -   1993
     -   Rosenthal
 -   https://jwmi.github.io/BMS/chapter6-gibbs-sampling.pdf
-    -   Chapter 6 of unknown book
+    -   Chapter 6 of unknown book with lots of examples
 -   https://ocw.mit.edu/courses/economics/14-384-time-series-analysis-fall-2013/lecture-notes/MIT14_384F13_lec26.pdf
     -   Lecture 26. MCMC: Gibbs Sampling
     -   Mikusheva
@@ -44,6 +44,7 @@
     -   Boltzmann Machines
     -   2007.03.25
     -   Hinton
+    -   A shallow description of Boltzmann machine’s principles
 
 ### Others
 
@@ -54,62 +55,39 @@
 
 Calculating the Gibbs distribution in a brute-force manner
 
-``` python
-def tPideal(t:Task,T:float=1)->PDist:
-  sz=tisize(t)
-  assert sz<=10, f"Are you crazy?"
-  Z=0.0
-  ps=np.zeros(2**sz)
-  for i in range(2**sz):
-    v=np.array([(1 if b>0 else -1) for b in i2bits(i,nbits=sz)])
-    p=exp(-tenergy(t,v)/T)
-    Z+=p
-    ps[i]=p
-  return mkpdist(ps/Z)
+``` sourceError
+SOURCE ERROR in "Gibbs.md.in" near line 57:
+The pattern given by "include" option "start_regex" was not found
 ```
 
 Callculating an approximation to the same Gibbs distribution using Gibbs
 sampler.
 
-``` python
-def gibbsPI(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->Iterator[PDist]:
-  sz=tisize(t)
-  v=np.zeros(shape=(sz,),dtype=int)
-  step=0
-  ps=np.zeros(2**sz)
-  while True:
-    if maxsteps is not None and step>=maxsteps:
-      break
-    for j in range(sz):
-      s=0
-      for i in range(sz):
-        if i!=j:
-          s+=t.weights[i,j]*v[i]
-      P1=sigmoid((2/T)*s)
-      v[j]=np_choice([1,-1],p=[P1,1.0-P1])
-    ps[vstamp(v)]+=1
-    step+=1
-    if step%100==0:
-      yield mkpdist(ps/step)
+``` sourceError
+SOURCE ERROR in "Gibbs.md.in" near line 66:
+The pattern given by "include" option "start_regex" was not found
 ```
 
 Comparing the results using KL-divergence
 
 ``` python
 @autostage(name='plotKL',T=1.0,out=[selfref,'out.png'],
-           sourcedeps=[gibbsPI, tPideal])
+           sourcedeps=[gibbsP,stat_PD,gibbsPD_ideal])
 def stage_plotKL(build:Build,name,reft,out,T=1.0):
   t=tload(reft.out)
-  pd1=tPideal(t,T)
+  pd1=gibbsPD_ideal(t,T)
   acc=[]
-  for pd2 in gibbsPI(t,T,maxsteps=100*1024):
+  for pd2 in stat_PD(t,gibbsP(t,T,maxsteps=100*1024)):
     kl=KL(pd1.pdf,pd2.pdf)
     acc.append(kl)
+  assert kl<0.001
   plt.close()
   plt.style.use('default')
-  plt.plot(acc,label='KL-dvg')
+  plt.plot(acc,label='KL-divirgence')
   plt.grid()
+  plt.legend()
+  plt.gca().set_xlabel('#samples*100')
   plt.savefig(out)
 ```
 
-![](img/2893561013825138459.png)
+![](img/7032249505444918607.png)

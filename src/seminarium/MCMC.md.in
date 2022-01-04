@@ -1,6 +1,6 @@
 
 ```{.python .cb.nb show=none, live_output=true}
-from annealing.MCMC import *
+from seminarium.MCMC import *
 from reports.lib import *
 import matplotlib.pyplot as plt
 plt.style.use('classic')

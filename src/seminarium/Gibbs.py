@@ -29,7 +29,7 @@ from reports.lib import *
 from utils.math import bits2i, sigmoid, i2bits
 
 plt.style.use('dark_background')
-fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
+# fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
 
 @dataclass_json
 @dataclass

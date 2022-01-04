@@ -2,7 +2,7 @@ Gibbs sampling and Botlzmann machines
 =====================================
 
 ```{.python .cb.nb show=none, live_output=true}
-from annealing.Gibbs import *
+from seminarium.Gibbs import *
 from reports.lib import *
 import matplotlib.pyplot as plt
 plt.style.use('classic')

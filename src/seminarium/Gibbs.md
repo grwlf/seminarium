@@ -4,8 +4,8 @@
         -   [Gibbs sampler](#gibbs-sampler)
         -   [Boltzmann machines](#boltzmann-machines)
         -   [Others](#others)
-    -   [Comparing ideal and Gibbs-sampled
-        distributions](#comparing-ideal-and-gibbs-sampled-distributions)
+    -   [Comparing ideal and Gibbs-sampled Gibbs
+        distributions](#comparing-ideal-and-gibbs-sampled-gibbs-distributions)
 
 # Gibbs sampling and Botlzmann machines
 
@@ -51,7 +51,7 @@
 -   https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence
     -   KL-divirgence
 
-## Comparing ideal and Gibbs-sampled distributions
+## Comparing ideal and Gibbs-sampled Gibbs distributions
 
 Calculating the Gibbs distribution in a brute-force manner
 
@@ -90,4 +90,4 @@ def stage_plotKL(build:Build,name,reft,out,T=1.0):
   plt.savefig(out)
 ```
 
-![](img/2857980105876764899.png)
+![](img/2563106287555950717.png)

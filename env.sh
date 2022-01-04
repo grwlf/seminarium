@@ -3,4 +3,4 @@ export PYTHONPATH=`pwd`/src:`pwd`/modules/sinara-config-builder/src:`pwd`/module
 export MYPYPATH=`pwd`/src:`pwd`/modules/sinara-config-builder/src:`pwd`/modules/qboard-sdk:`pwd`/modules/pylightnix/src:`pwd`/modules/qiskit-terra:`pwd`/modules/qiskit-aer
 export PATH=`pwd`/scripts:$PATH
 alias ipython="sh `pwd`/ipython.sh"
-
+export PYLIGHTNIX_ROOT=`pwd`/_pylightnix

@@ -51,8 +51,8 @@ Resources
 * https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence
   - KL-divirgence
 
-Comparing ideal and Gibbs-sampled distributions
------------------------------------------------
+Comparing ideal and Gibbs-sampled Gibbs distributions
+-----------------------------------------------------
 
 Calculating the Gibbs distribution in a brute-force manner
 

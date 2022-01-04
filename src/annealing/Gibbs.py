@@ -72,37 +72,38 @@ def trandom(sz:int=10)->Task:
   assert_allclose(w,w.T)
   return Task(w)
 
-@dataclass_json
-@dataclass
-class GibbsResults:
-  t:Task
-  Xs:List[np.ndarray]
-  T:float
+# @dataclass_json
+# @dataclass
+# class GibbsResults:
+#   t:Task
+#   Xs:List[np.ndarray]
+#   T:float
 
 
-def gibbs(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->GibbsResults:
-  sz=tisize(t)
-  v=np.zeros(shape=(sz,),dtype=int)
-  step=0
-  Xs=[]
-  while True:
-    if maxsteps is not None and step>=maxsteps:
-      break
-    for j in range(sz):
-      s=0
-      for i in range(sz):
-        if i!=j:
-          s+=t.weights[i,j]*v[i]
-      P1=sigmoid((1/T)*s)
-      v[j]=np_choice([1,0],p=[P1,1.0-P1])
-    Xs.append(v.copy())
-    step+=1
-  return GibbsResults(t,Xs,T)
+# def gibbs(t:Task, T:float=1.0, maxsteps:Optional[int]=100)->GibbsResults:
+#   sz=tisize(t)
+#   v=np.zeros(shape=(sz,),dtype=int)
+#   step=0
+#   Xs=[]
+#   while True:
+#     if maxsteps is not None and step>=maxsteps:
+#       break
+#     for j in range(sz):
+#       s=0
+#       for i in range(sz):
+#         if i!=j:
+#           s+=t.weights[i,j]*v[i]
+#       P1=sigmoid((1/T)*s)
+#       v[j]=np_choice([1,0],p=[P1,1.0-P1])
+#     Xs.append(v.copy())
+#     step+=1
+#   return GibbsResults(t,Xs,T)
 
 
 @dataclass_json
 @dataclass
 class PDist:
+  """ 1-D Probability distribution """
   pdf:np.ndarray
 
 
@@ -111,6 +112,8 @@ def mkpdist(ps:np.ndarray)->PDist:
   return PDist(ps)
 
 def gibbsPD_ideal(t:Task,T:float=1)->PDist:
+  """ Gibbs distribution for task `T`, calculated by definition (ineffective).
+  """
   sz=tisize(t)
   assert sz<=10, f"Are you crazy?"
   Z=0.0
@@ -122,18 +125,55 @@ def gibbsPD_ideal(t:Task,T:float=1)->PDist:
     ps[i]=p
   return mkpdist(ps/Z)
 
+@dataclass_json
+@dataclass
+class Dataset:
+  ds:np.ndarray
+
+def mkds(ds:np.ndarray)->Dataset:
+  assert len(ds.shape)==2
+  assert ds.shape[0]>0
+  for i in range(ds.shape[0]):
+    for j in range(ds.shape[1]):
+      assert ds[i,j]==1 or ds[i,j]==-1, f"ds[{i},{j}]=={ds[i,j]}"
+  assert all(ds.shape)==2
+  return Dataset(ds)
+
+def dssize(d:Dataset)->int:
+  return d.ds.shape[0]
+
+def dsitem(d:Dataset,i:int)->np.ndarray:
+  return d.ds[i,:]
+
 
 def gibbsP(t:Task,
            T:float=1.0,
-           maxsteps:Optional[int]=100
+           maxsteps:Optional[int]=100,
+           d:Optional[Dataset]=None
            )->Iterator[np.ndarray]:
+  """ Gibbs-sample data points according to Gibbs distribution for task `T`.
+  Probabilities are calculated approximately. During the sampling, some of
+  neurons may be "clamped" to the points specified by the optional Dataset `ds`.
+  """
   sz=tisize(t)
+  ds=dssize(d) if d is not None else 0
+  assert ds<=sz, f"Dataset size ({ds}) should be <= than task size ({sz})."
+  if maxsteps is not None:
+    assert ds<=maxsteps, \
+      f"Gibbs sampler can't visit {ds} dataset items in {maxsteps} iterations"
   v=np.zeros(shape=(sz,),dtype=int)
   step=0
+  dsiter=0
   while True:
     if maxsteps is not None and step>=maxsteps:
       break
-    for j in range(sz):
+    # Clamp some neurons
+    a=dsitem(d,dsiter) if d is not None else np.array([])
+    for j in range(ds):
+      v[j]=a[j]
+    dsiter=dsiter+1 if (dsiter+1)<ds else 0
+    # Sample other neurons
+    for j in range(ds,sz):
       s=0
       for i in range(sz):
         if i!=j:

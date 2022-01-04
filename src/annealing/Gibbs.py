@@ -151,10 +151,9 @@ def gibbsP(t:Task,
            maxsteps:Optional[int]=100,
            d:Optional[Dataset]=None
            )->Iterator[np.ndarray]:
-  """ Gibbs-sample data points according to Gibbs distribution for task `T`.
-  Probabilities are calculated approximately. During the sampling, some of
-  neurons may be "clamped" to the points specified by the optional Dataset `ds`.
-  """
+  """ Gibbs-sample data points according to a Gibbs distribution for task `T`.
+  Probabilities are calculated approximately. Some of the neurons may be
+  "clamped" to the values specified by the optional Dataset `ds`.  """
   sz=tisize(t)
   ds=dssize(d) if d is not None else 0
   assert ds<=sz, f"Dataset size ({ds}) should be <= than task size ({sz})."
@@ -167,12 +166,12 @@ def gibbsP(t:Task,
   while True:
     if maxsteps is not None and step>=maxsteps:
       break
-    # Clamp some neurons
+    # Clamp dirst `ds` neurons
     a=dsitem(d,dsiter) if d is not None else np.array([])
     for j in range(ds):
       v[j]=a[j]
     dsiter=dsiter+1 if (dsiter+1)<ds else 0
-    # Sample other neurons
+    # Sample using other neurons
     for j in range(ds,sz):
       s=0
       for i in range(sz):
@@ -180,6 +179,7 @@ def gibbsP(t:Task,
           s+=t.weights[i,j]*v[i]
       P1=sigmoid((2/T)*s)
       v[j]=np_choice([1,-1],p=[P1,1.0-P1])
+    # Yield the neuron states
     yield v
     step+=1
 

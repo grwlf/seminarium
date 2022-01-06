@@ -18,6 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain
 from os.path import join, dirname
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import plot, hist, subplots
@@ -128,22 +129,30 @@ def gibbsPD_ideal(t:Task,T:float=1)->PDist:
 @dataclass_json
 @dataclass
 class Dataset:
-  ds:np.ndarray
+  X:np.ndarray
+  Y:np.ndarray
 
-def mkds(ds:np.ndarray)->Dataset:
-  assert len(ds.shape)==2
-  assert ds.shape[0]>0
-  for i in range(ds.shape[0]):
-    for j in range(ds.shape[1]):
-      assert ds[i,j]==1 or ds[i,j]==-1, f"ds[{i},{j}]=={ds[i,j]}"
-  assert all(ds.shape)==2
-  return Dataset(ds)
+def mkds(x:np.ndarray, y:np.ndarray)->Dataset:
+  assert len(x.shape)==2
+  assert len(y.shape)==1
+  assert x.shape[0]==y.shape[0]
+  assert x.shape[0]>0
+  ex=x[(x!=1)&(x!=-1)]
+  assert all(d==0 for d in ex.shape), f"{ex.shape}"
+  ey=y[(y<0)|(y>9)]
+  assert all(d==0 for d in ey.shape), f"{ey.shape}"
+  return Dataset(x,y)
+
+
 
 def dssize(d:Dataset)->int:
-  return d.ds.shape[0]
+  return d.X.shape[0]
+
+def dsitemsz(d:Dataset)->int:
+  return d.X.shape[1]
 
 def dsitem(d:Dataset,i:int)->np.ndarray:
-  return d.ds[i,:]
+  return d.X[i,:]
 
 
 def gibbsP(t:Task,
@@ -156,7 +165,8 @@ def gibbsP(t:Task,
   "clamped" to the values specified by the optional Dataset `ds`.  """
   sz=tisize(t)
   ds=dssize(d) if d is not None else 0
-  assert ds<=sz, f"Dataset size ({ds}) should be <= than task size ({sz})."
+  ts=dsitemsz(d) if d is not None else 0
+  assert ts<=sz, f"Data item size ({ts}) should be <= than task size ({sz})."
   if maxsteps is not None:
     assert ds<=maxsteps, \
       f"Gibbs sampler can't visit {ds} dataset items in {maxsteps} iterations"
@@ -172,7 +182,7 @@ def gibbsP(t:Task,
       v[j]=a[j]
     dsiter=dsiter+1 if (dsiter+1)<ds else 0
     # Sample using other neurons
-    for j in range(ds,sz):
+    for j in range(ts,sz):
       s=0
       for i in range(sz):
         if i!=j:
@@ -195,7 +205,36 @@ def stat_PD(t:Task, gen:Iterator[np.ndarray])->Iterator[PDist]:
     step+=1
 
 
+def stat_Boltzmann(t:Task, d:Dataset, epsilon=0.01)->Iterator[Task]:
+  sz=tisize(t)
+  ds=dssize(d)
+  ts=dsitemsz(d)
+  W=deepcopy(t.weights)
+  step=0
+  T=1.0
+  while True:
+    dLdW=np.zeros(shape=t.weights.shape,dtype=float)
+    G=gibbsP(t,T,maxsteps=ds*100,d=d)
+    for nv1,v in enumerate(G):
+      for j in range(sz):
+        for i in range(sz):
+          if i!=j:
+            dLdW[i,j]+=v[i]*v[j]
+    G=gibbsP(t,T,maxsteps=ds*100,d=None)
+    for nv2,v in enumerate(G):
+      for j in range(ts,sz):
+        for i in range(sz):
+          if i!=j:
+            dLdW[i,j]-=v[i]*v[j]
+    dLdW/=2*((nv1+1)+(nv2+1))
+    W+=epsilon*dLdW/T
+    yield Task(W)
+    step+=1
+
+
 def KL(a, b):
+  """ Calculate the KL-divergence providing that both arrays encode probability
+  distributions of the same discrete random variable. """
   a=np.asarray(a,dtype=float)
   b=np.asarray(b,dtype=float)
   return np.sum(np.where(a!=0,a*np.log(a/b),0))

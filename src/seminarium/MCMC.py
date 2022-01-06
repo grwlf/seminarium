@@ -40,6 +40,9 @@ plt.style.use('dark_background')
 @dataclass_json
 @dataclass
 class Task:
+  """ Task describes a particular task of finding the minimum of a
+  function specified in `teval`. `ks` define the coefficients required to do the
+  calculation """
   size:int
   ks:List[float]
 

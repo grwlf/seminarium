@@ -65,6 +65,13 @@ def tenergy(t:Task, v:np.ndarray)->float:
       s+=t.weights[i,j]*v[i]*v[j]
   return -s
 
+def tenergy2(t:Task, v:np.ndarray)->float:
+  sz=tisize(t)
+  assert v.shape[0]==sz, f"Task-vector size mismatch"
+  v2=v.reshape((v.shape[0],1))
+  vv=v2@v2.transpose()
+  return -np.sum((t.weights*vv)/2)
+
 def trandom(sz:int=10)->Task:
   w=np.random.uniform(-1.0,1.0,size=(sz,sz))
   for i in range(sz):
@@ -154,6 +161,22 @@ def dsitemsz(d:Dataset)->int:
 def dsitem(d:Dataset,i:int)->np.ndarray:
   return d.X[i,:]
 
+def dslogprob(d:Dataset, t:Task)->float:
+  """ Calculate the log-probability of sampling the dataset `d` out of
+  Gibbs-distribution with weights `t`. """
+  s=0.0
+  for i in range(dssize(d)):
+    s+=tenergy2(t,dsitem(d,i))
+    if i%1000==0:
+      print(i)
+  return s
+
+def dslogprob2(d:Dataset, t:Task)->float:
+  """ Calculate the log-probability of sampling the dataset `d` out of
+  Gibbs-distribution with weights `t`. """
+  dX=d.X[:1000,:]
+  X=dX.reshape((dX.shape[0],dX.shape[1],1))
+  return np.sum((X@X.transpose([0,2,1]))*t.weights)/2
 
 def gibbsP(t:Task,
            T:float=1.0,

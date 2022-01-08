@@ -72,11 +72,20 @@ def tenergy2(t:Task, v:np.ndarray)->float:
   vv=v2@v2.transpose()
   return -np.sum((t.weights*vv)/2)
 
+
+def test_tenergy():
+  sz=10
+  t=trandom(sz)
+  v=np.random.choice([-1.0,1.0],size=(sz,))
+  e=tenergy(t,v)
+  e2=tenergy2(t,v)
+  assert_allclose(e,e2)
+
 def trandom(sz:int=10)->Task:
   w=np.random.uniform(-1.0,1.0,size=(sz,sz))
   for i in range(sz):
-    for j in range(i+1,sz):
-      w[j,i]=w[i,j]
+    for j in range(i,sz):
+      w[j,i]=w[i,j] if i!=j else 0.0
   assert_allclose(w,w.T)
   return Task(w)
 
@@ -143,7 +152,7 @@ def mkds(x:np.ndarray, y:np.ndarray)->Dataset:
   assert len(x.shape)==2
   assert len(y.shape)==1
   assert x.shape[0]==y.shape[0]
-  assert x.shape[0]>0
+  assert x.shape[0]>0, f"{x.shape}"
   ex=x[(x!=1)&(x!=-1)]
   assert all(d==0 for d in ex.shape), f"{ex.shape}"
   ey=y[(y<0)|(y>9)]
@@ -151,15 +160,34 @@ def mkds(x:np.ndarray, y:np.ndarray)->Dataset:
   return Dataset(x,y)
 
 
+def dsmnist(path:str, limit:Optional[int]=None)->Dataset:
+  d=np.load(path,allow_pickle=True)
+  x=d['x_train']
+  y=d['y_train']
+  if limit is not None:
+    x=x[:limit]
+    y=y[:limit]
+  x=x.reshape((x.shape[0],-1)).astype(int)
+  x[x==0.0]=-1
+  x[x==1.0]=1
+  return mkds(x,y)
 
 def dssize(d:Dataset)->int:
+  """ Number of images in the dataset """
   return d.X.shape[0]
 
 def dsitemsz(d:Dataset)->int:
+  """ Size of images in pixels """
   return d.X.shape[1]
 
 def dsitem(d:Dataset,i:int)->np.ndarray:
   return d.X[i,:]
+
+def dsslice(d:Dataset,f,t)->Dataset:
+  assert f<t
+  df=t-f
+  f2=f%(d.X.shape[0]-df)
+  return mkds(d.X[f2:f2+df,:],d.Y[f2:f2+df])
 
 def dslogprob(d:Dataset, t:Task)->float:
   """ Calculate the log-probability of sampling the dataset `d` out of
@@ -167,16 +195,31 @@ def dslogprob(d:Dataset, t:Task)->float:
   s=0.0
   for i in range(dssize(d)):
     s+=tenergy2(t,dsitem(d,i))
-    if i%1000==0:
-      print(i)
+    # if i%100==0:
+    #   print(i)
   return s
+
 
 def dslogprob2(d:Dataset, t:Task)->float:
   """ Calculate the log-probability of sampling the dataset `d` out of
-  Gibbs-distribution with weights `t`. """
-  dX=d.X[:1000,:]
+  Gibbs-distribution with weights `t`. Cant swallow large datasets. """
+  dX=d.X # [:1000,:]
+  # assert dX.shape[2]==3
+  assert len(dX.shape)==2, f"{dX.shape}"
   X=dX.reshape((dX.shape[0],dX.shape[1],1))
-  return np.sum((X@X.transpose([0,2,1]))*t.weights)/2
+  return -np.sum((X@X.transpose([0,2,1]))*t.weights)/2
+
+
+def test_logprob():
+  sz=10
+  t=trandom(sz)
+  d=mkds(np.random.choice([-1,1],size=(3,sz)),
+         np.random.choice(range(10),size=(3,)))
+  lp1=dslogprob(d,t)
+  lp2=dslogprob2(d,t)
+  assert_allclose(lp1,lp2)
+
+
 
 def gibbsP(t:Task,
            T:float=1.0,
@@ -201,7 +244,7 @@ def gibbsP(t:Task,
       break
     # Clamp dirst `ds` neurons
     a=dsitem(d,dsiter) if d is not None else np.array([])
-    for j in range(ds):
+    for j in range(ts):
       v[j]=a[j]
     dsiter=dsiter+1 if (dsiter+1)<ds else 0
     # Sample using other neurons
@@ -253,6 +296,56 @@ def stat_Boltzmann(t:Task, d:Dataset, epsilon=0.01)->Iterator[Task]:
     W+=epsilon*dLdW/T
     yield Task(W)
     step+=1
+
+def boltzstep(t:Task, d:Dataset)->Iterator[Task]:
+  sz=tisize(t)
+  ts=dsitemsz(d)
+  W=deepcopy(t.weights)
+  T=1.0
+  epsilon=0.01
+
+  batch=100
+  maxsteps=6
+  step=0
+  X=np.zeros((batch,sz,1),dtype=int)
+  dLdW=np.zeros(shape=t.weights.shape,dtype=float)
+  tW=t
+  while True:
+    if step>=maxsteps:
+      break
+    dbatch=dsslice(d,batch*step,batch*(step+1))
+    bs=dssize(dbatch)
+    Xbatch=X[:bs]
+    G=gibbsP(tW,T,maxsteps=bs,d=dbatch)
+    for i,v in enumerate(G):
+      Xbatch[i,:,0]=v
+    s1=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*t.weights,axis=0)/2
+    G=gibbsP(tW,T,maxsteps=bs,d=None)
+    for i,v in enumerate(G):
+      Xbatch[i,:,0]=v
+    s2=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*t.weights,axis=0)/2
+    dLdW=s1-s2
+    W+=epsilon*dLdW/T
+    tW=Task(W)
+    yield tW
+    step+=1
+
+def boltztrain(t:Task, d:Dataset):
+  acc=[]
+  P=dslogprob2(d,t)
+  print(P)
+  acc.append(P)
+  for tn in boltzstep(t,d):
+    P=dslogprob2(d,tn)
+    print(P)
+    acc.append(P)
+  return acc
+
+
+def boltzrun(a):
+  d=dsmnist(a.out,limit=1000)
+  t=trandom(dsitemsz(d))
+  boltztrain(t,d)
 
 
 def KL(a, b):

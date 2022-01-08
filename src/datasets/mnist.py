@@ -15,15 +15,6 @@ import numpy as np
 
 # fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
 
-def gibbsmnist(path:str)->Gibbs_Dataset:
-  d=np.load(path,allow_pickle=True)
-  x=d['x_train']
-  x=x.reshape((x.shape[0],-1)).astype(int)
-  x[x==0.0]=-1
-  x[x==1.0]=1
-  y=d['y_train']
-  return mkds(x,y)
-
 
 def stage_mnist(r:Optional[Registry]=None)->DRef:
   """ Fetch the MNIST dataset from the Internet """

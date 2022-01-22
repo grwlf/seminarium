@@ -8,8 +8,6 @@ from pylightnix import (Registry, DRef, fsinit, realizeU, instantiate,
                         fetchurl2, selfref, autostage)
 from reports.lib import *
 
-from seminarium.Gibbs import Dataset as Gibbs_Dataset, mkds
-
 import matplotlib.pyplot as plt
 import numpy as np
 

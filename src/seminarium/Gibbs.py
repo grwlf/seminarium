@@ -28,6 +28,7 @@ from reports.lib import kshow
 from reports.lib import *
 
 from utils.math import bits2i, sigmoid, i2bits
+from datasets.mnist import stage_bwmnist
 
 plt.style.use('dark_background')
 # fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
@@ -223,39 +224,36 @@ def test_logprob():
 
 def gibbsP(t:Task,
            T:float=1.0,
+           X0:Optional[np.ndarray]=None,
            maxsteps:Optional[int]=100,
-           d:Optional[Dataset]=None
+           Xclamp:Optional[np.ndarray]=None
            )->Iterator[np.ndarray]:
   """ Gibbs-sample data points according to a Gibbs distribution for task `T`.
   Probabilities are calculated approximately. Some of the neurons may be
   "clamped" to the values specified by the optional Dataset `ds`.  """
   sz=tisize(t)
-  ds=dssize(d) if d is not None else 0
-  ts=dsitemsz(d) if d is not None else 0
-  assert ts<=sz, f"Data item size ({ts}) should be <= than task size ({sz})."
-  if maxsteps is not None:
-    assert ds<=maxsteps, \
-      f"Gibbs sampler can't visit {ds} dataset items in {maxsteps} iterations"
-  v=np.zeros(shape=(sz,),dtype=int)
+  ts=Xclamp.shape[0] if Xclamp is not None else 0
+  assert ts<=sz, f"Xclamp length ({ts}) should be <= task size ({sz})."
+  v=X0 if X0 is not None else np.zeros(shape=(sz,),dtype=int)
+  assert len(v.shape)==1
+  assert v.shape[0]==sz
   step=0
-  dsiter=0
+  # Clamp dirst `ts` neurons
+  if Xclamp is not None:
+    v[:ts]=Xclamp
   while True:
     if maxsteps is not None and step>=maxsteps:
       break
-    # Clamp dirst `ds` neurons
-    a=dsitem(d,dsiter) if d is not None else np.array([])
-    for j in range(ts):
-      v[j]=a[j]
-    dsiter=dsiter+1 if (dsiter+1)<ds else 0
-    # Sample using other neurons
+    # Sample j-th node given all other nodes
     for j in range(ts,sz):
       s=0
       for i in range(sz):
         if i!=j:
           s+=t.weights[i,j]*v[i]
       P1=sigmoid((2/T)*s)
+      # print(P1)
       v[j]=np_choice([1,-1],p=[P1,1.0-P1])
-    # Yield the neuron states
+    # Yield the node state vector
     yield v
     step+=1
 
@@ -271,63 +269,66 @@ def stat_PD(t:Task, gen:Iterator[np.ndarray])->Iterator[PDist]:
     step+=1
 
 
-def stat_Boltzmann(t:Task, d:Dataset, epsilon=0.01)->Iterator[Task]:
-  sz=tisize(t)
-  ds=dssize(d)
-  ts=dsitemsz(d)
-  W=deepcopy(t.weights)
-  step=0
-  T=1.0
-  while True:
-    dLdW=np.zeros(shape=t.weights.shape,dtype=float)
-    G=gibbsP(t,T,maxsteps=ds*100,d=d)
-    for nv1,v in enumerate(G):
-      for j in range(sz):
-        for i in range(sz):
-          if i!=j:
-            dLdW[i,j]+=v[i]*v[j]
-    G=gibbsP(t,T,maxsteps=ds*100,d=None)
-    for nv2,v in enumerate(G):
-      for j in range(ts,sz):
-        for i in range(sz):
-          if i!=j:
-            dLdW[i,j]-=v[i]*v[j]
-    dLdW/=2*((nv1+1)+(nv2+1))
-    W+=epsilon*dLdW/T
-    yield Task(W)
-    step+=1
+# def stat_Boltzmann(t:Task, d:Dataset, epsilon=0.01)->Iterator[Task]:
+#   sz=tisize(t)
+#   ds=dssize(d)
+#   ts=dsitemsz(d)
+#   W=deepcopy(t.weights)
+#   step=0
+#   T=1.0
+#   while True:
+#     dLdW=np.zeros(shape=t.weights.shape,dtype=float)
+#     G=gibbsP(t,T,maxsteps=ds*100,d=d)
+#     for nv1,v in enumerate(G):
+#       for j in range(sz):
+#         for i in range(sz):
+#           if i!=j:
+#             dLdW[i,j]+=v[i]*v[j]
+#     G=gibbsP(t,T,maxsteps=ds*100,d=None)
+#     for nv2,v in enumerate(G):
+#       for j in range(ts,sz):
+#         for i in range(sz):
+#           if i!=j:
+#             dLdW[i,j]-=v[i]*v[j]
+#     dLdW/=2*((nv1+1)+(nv2+1))
+#     W+=epsilon*dLdW/T
+#     yield Task(W)
+#     step+=1
 
-def boltzstep(t:Task, d:Dataset)->Iterator[Task]:
+def boltzstep(t:Task, d:Dataset,
+              initstep:int=0,
+              X0:Optional[np.ndarray]=None,
+              maxsteps=100,
+              T=1.0)->Iterator[Tuple[int,Task,np.ndarray]]:
   sz=tisize(t)
   ts=dsitemsz(d)
   W=deepcopy(t.weights)
-  T=1.0
   epsilon=0.01
-
-  batch=100
-  maxsteps=6
-  step=0
-  X=np.zeros((batch,sz,1),dtype=int)
+  warmup=100
+  batch=1
+  step=initstep
+  dbatch=dsslice(d,0,batch)
+  bs=dssize(dbatch)
+  X=X0 if X0 is not None else np.random.choice([1,-1],size=sz)
+  Xbatch=np.random.choice([-1,1],size=(bs,sz,1))
   dLdW=np.zeros(shape=t.weights.shape,dtype=float)
   tW=t
   while True:
     if step>=maxsteps:
       break
-    dbatch=dsslice(d,batch*step,batch*(step+1))
-    bs=dssize(dbatch)
-    Xbatch=X[:bs]
-    G=gibbsP(tW,T,maxsteps=bs,d=dbatch)
-    for i,v in enumerate(G):
-      Xbatch[i,:,0]=v
-    s1=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*t.weights,axis=0)/2
-    G=gibbsP(tW,T,maxsteps=bs,d=None)
-    for i,v in enumerate(G):
-      Xbatch[i,:,0]=v
-    s2=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*t.weights,axis=0)/2
+    for i in range(bs):
+      for X in gibbsP(tW,T,maxsteps=warmup,X0=X,Xclamp=dsitem(dbatch,i)):
+        pass
+      Xbatch[i,:,0]=X
+    s1=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*tW.weights,axis=0)/2
+    for i,X in enumerate(gibbsP(tW,T,maxsteps=warmup+bs,X0=X,Xclamp=None)):
+      if i>=warmup:
+        Xbatch[i-warmup,:,0]=X
+    s2=np.sum((Xbatch@Xbatch.transpose([0,2,1]))*tW.weights,axis=0)/2
     dLdW=s1-s2
     W+=epsilon*dLdW/T
     tW=Task(W)
-    yield tW
+    yield step,tW,X
     step+=1
 
 def boltztrain(t:Task, d:Dataset):
@@ -335,17 +336,11 @@ def boltztrain(t:Task, d:Dataset):
   P=dslogprob2(d,t)
   print(P)
   acc.append(P)
-  for tn in boltzstep(t,d):
+  for step,tn,v in boltzstep(t,d,0):
     P=dslogprob2(d,tn)
-    print(P)
+    print(step,P)
     acc.append(P)
   return acc
-
-
-def boltzrun(a):
-  d=dsmnist(a.out,limit=1000)
-  t=trandom(dsitemsz(d))
-  boltztrain(t,d)
 
 
 def KL(a, b):
@@ -388,5 +383,83 @@ def run():
     reft=stage_gibbstask()
     refp=stage_plotKL(reft=reft)
     return realizeU(instantiate(refp))
+
+
+@autostage(name='boltztrain',
+           size=28*28+100,
+           # size=28*28,
+           mnist=stage_bwmnist,
+           out_W=[selfref,'W.npy'],
+           out_steps=[selfref,'steps.npy'],
+           out_X=[selfref,'X.npy'],
+           mnist_limit=1000,
+           maxsteps=10000,
+           T=0.01)
+def stage_boltztrain(build:Build,
+                     name, size, mnist,
+                     out_W, out_steps, out_X, mnist_limit, maxsteps, T,
+                     refcontinue:Optional[RRef]=None):
+  v=5
+  d=dsmnist(mnist.out,limit=mnist_limit)
+  if refcontinue is not None:
+    assert size==mklens(refcontinue).size.val
+    t=Task(np.load(mklens(refcontinue).out_W.syspath))
+    X0=np.load(mklens(refcontinue).out_X.syspath)
+    step=np.load(mklens(refcontinue).out_steps.syspath)+1
+    print(f'continue from {step}')
+  else:
+    t=trandom(dsitemsz(d))
+    step=0
+    X0=None
+    # P=dslogprob2(d,t)
+    # print('initial',P)
+    print('initial')
+  try:
+    for s,tn,X in boltzstep(t,d,initstep=step,X0=X0,maxsteps=maxsteps,T=T):
+      # P=dslogprob2(d,tn)
+      # print(s,P)
+      print(s)
+      np.save(out_W,tn.weights)
+      np.save(out_steps,s)
+      np.save(out_X,X)
+  except KeyboardInterrupt:
+    pass
+
+
+def boltzrun():
+  cont=realizeU(instantiate(stage_boltztrain))
+
+def boltzcont():
+  _,clo=instantiate(stage_boltztrain)
+  cont=realizeU(clo,assert_realized=clo.targets)
+  return realizeU(instantiate(stage_boltztrain,refcontinue=cont._rref),
+                  force_rebuild=clo.targets)
+
+
+def boltzsample(T=1):
+  n=6
+  # T=1000000000
+  # T=10000
+  a=realizeU(instantiate(stage_boltztrain))
+  step=np.load(a.out_steps)
+  print(f"Loading Boltzmann weights after {step} steps of training")
+  t=Task(np.load(a.out_W))
+  print(f"Done, shape {t.weights.shape}")
+  d=dsmnist(a.mnist.out,limit=a.mnist_limit)
+  # print(t)
+  warmup=5
+  acc=[]
+  G=gibbsP(t,T,maxsteps=warmup+n,Xclamp=None)
+  for i,v in enumerate(G):
+    if i>=warmup:
+      acc.append(deepcopy(v))
+  plt.figure()
+  for i,v in enumerate(acc):
+    plt.subplot(ceil(len(acc)/3),3,i+1)
+    plt.imshow(v[:28*28].reshape((28,28)),cmap=plt.get_cmap('gray'),
+               interpolation='none',
+               resample=False)
+  plt.savefig('_out.png')
+  kittydraw('_out.png')
 
 

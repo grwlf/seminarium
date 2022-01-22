@@ -198,27 +198,20 @@ def same(l,rtol)->bool:
   return all(np.isclose(x,l[-1],rtol=rtol) for x in l)
 
 
-def anneal(t,F,G,T,T1,X0,decay,maxaccepts=None,stepused=0,patience=3,rtol=0.01):
+def anneal(S,T,T1,X0,decay,budget=0,patience=3,rtol=0.01):
   assert T>0.0, f"T0={T}<=0.0 ??"
   assert T1>0.0, f"T1={T1}<=0.0 ??"
-  maxaccepts2=t.size if maxaccepts is None else maxaccepts
-  task_size=t.size
-  budget=task_size-stepused
   assert budget>0, f"{budget}<=0 ??"
   rs:List[MetropolisResults[List[int]]]=[]
   while True:
     maxloops=log(T1/T,decay)
     if budget<=0 or maxloops<=0:
       break
-    maxsteps=min(1000,task_size/20,int(budget/maxloops)) # Maxsteps per T
-    assert maxsteps>0, f"{maxsteps}<=0 ??"
-    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else X0,
-                         maxaccepts=maxaccepts2,
-                         maxsteps=maxsteps))
+    rs.append(S(T=T,X0=rs[-1].Xs[-1] if rs else X0,budget=budget))
     nsteps=sum(len(r.Xs) for r in rs)
     yield rs
     solutions=[r.Ys[-1] for r in rs[-patience:]]
-    print(f"T {T:0.3f} ns {nsteps} bu {budget} ms {maxsteps} : {solutions}")
+    print(f"T {T:0.3f} ns {nsteps} bu {budget} : {solutions}")
     if len(solutions)==patience and same(solutions,rtol):
       break
     T*=decay
@@ -286,11 +279,22 @@ def _worker(ref_T0,decay,rtol,patience,out_results,name,
   t=tload(ref_T0.ref_koef._rref)
   dim=ref_T0.dim
   X0=np_choice(range(int(t.size**(1/dim))),size=(dim,)).tolist()
+  task_size=t.size
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t)
-  for rs in anneal(t,F,G,T,T1,X0,decay,
-                   maxaccepts,stepused=np.load(ref_T0.out_stepsused),
-                   patience=patience,rtol=rtol):
+  stepused=np.load(ref_T0.out_stepsused)
+  budget=task_size-stepused
+
+  def _metropolis(T,X0,budget):
+    maxloops=log(T1/T,decay)
+    maxaccepts2=t.size if maxaccepts is None else maxaccepts
+    maxsteps=min(1000,task_size/20,int(budget/maxloops)) # Maxsteps per T
+    assert maxsteps>0, f"{maxsteps}<=0 ??"
+    return metropolis(F=F,G=G,T=T,X_0=X0,
+                      maxaccepts=maxaccepts2,
+                      maxsteps=maxsteps)
+  for rs in anneal(_metropolis,T,T1,X0,decay,
+                   budget=budget,patience=patience,rtol=rtol):
     acc=[]
     for r in rs:
       dd=r.to_dict() # type: ignore

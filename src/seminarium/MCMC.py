@@ -167,6 +167,64 @@ def metropolis(F:Callable[[V],float],
   return MetropolisResults(Xs,Ys,Ps,Ac,T)
 
 
+def findT(F, G, fX0, Tstart=1, T0max=1e6, T0min=0.001,
+          waitsteps=100, Paccept_tgt=0.8, Paccept_sol=0.01, factor=2
+          )->Tuple[float,float,int]:
+  """ Find the best initial Ti and end Te tempteratures of the annealing. Also
+  return the number of steps used (to record the step budget spendings). """
+  T0i=Tstart
+  nsteps=0
+  while T0i<T0max:
+    r=metropolis(F=F,G=G,T=T0i,X_0=fX0(),maxsteps=waitsteps)
+    Paccept=sum(ac for ac in r.Ac if ac>0)/len(r.Ac)
+    print(f"T0i {T0i} Paccept {Paccept} steps {nsteps+waitsteps}")
+    if Paccept>=Paccept_tgt:
+      break
+    T0i*=factor
+    nsteps+=waitsteps
+  T0e=Tstart
+  while T0e>T0min:
+    r=metropolis(F=F,G=G,T=T0e,X_0=fX0(),maxsteps=waitsteps)
+    Paccept=sum(ac for ac in r.Ac if ac>0)/len(r.Ac)
+    print(f"T0e {T0e} Paccept {Paccept} steps {nsteps+waitsteps}")
+    if Paccept<=Paccept_sol:
+      break
+    T0e/=factor
+    nsteps+=waitsteps
+  return T0i,T0e,nsteps
+
+
+def same(l,rtol)->bool:
+  return all(np.isclose(x,l[-1],rtol=rtol) for x in l)
+
+
+def anneal(t,F,G,T,T1,X0,decay,maxaccepts=None,stepused=0,patience=3,rtol=0.01):
+  assert T>0.0, f"T0={T}<=0.0 ??"
+  assert T1>0.0, f"T1={T1}<=0.0 ??"
+  maxaccepts2=t.size if maxaccepts is None else maxaccepts
+  task_size=t.size
+  budget=task_size-stepused
+  assert budget>0, f"{budget}<=0 ??"
+  rs:List[MetropolisResults[List[int]]]=[]
+  while True:
+    maxloops=log(T1/T,decay)
+    if budget<=0 or maxloops<=0:
+      break
+    maxsteps=min(1000,task_size/20,int(budget/maxloops)) # Maxsteps per T
+    assert maxsteps>0, f"{maxsteps}<=0 ??"
+    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else X0,
+                         maxaccepts=maxaccepts2,
+                         maxsteps=maxsteps))
+    nsteps=sum(len(r.Xs) for r in rs)
+    yield rs
+    solutions=[r.Ys[-1] for r in rs[-patience:]]
+    print(f"T {T:0.3f} ns {nsteps} bu {budget} ms {maxsteps} : {solutions}")
+    if len(solutions)==patience and same(solutions,rtol):
+      break
+    T*=decay
+    budget-=len(rs[-1].Xs)
+
+
 #  ____  _
 # / ___|| |_ __ _  __ _  ___  ___
 # \___ \| __/ _` |/ _` |/ _ \/ __|
@@ -202,41 +260,21 @@ def stage_koef(build:Build,name,index,N,scale,out_ks,task_size):
            out_T1=[selfref,'T1.npy'],
            out_stepsused=[selfref,'stepsused.npy'],
            dim=4,
-           sourcedeps=[metropolis,teval,tsuggestX])
+           sourcedeps=[metropolis,teval,tsuggestX,findT])
 def stage_findT0(build:Build,ref_koef,Tstart,T0min,T0max,factor,
                  waitsteps,Paccept_tgt,out_T0,dim,Paccept_sol,out_T1,
                  out_stepsused):
   t=tload(ref_koef._rref)
+  def _fX0():
+    return np_choice(range(int(t.size**(1/dim))),size=(dim,)).tolist()
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t)
-  T0i=Tstart
-  nsteps=0
-  while T0i<T0max:
-    X0=np_choice(range(int(t.size**(1/dim))),size=(dim,)).tolist()
-    r=metropolis(F=F,G=G,T=T0i,X_0=X0,maxsteps=waitsteps)
-    Paccept=sum(ac for ac in r.Ac if ac>0)/len(r.Ac)
-    print(f"T0i {T0i} Paccept {Paccept} steps {nsteps+waitsteps}")
-    if Paccept>=Paccept_tgt:
-      break
-    T0i*=factor
-    nsteps+=waitsteps
-  T0e=Tstart
-  while T0e>T0min:
-    X0=np_choice(range(int(t.size**(1/dim))),size=(dim,)).tolist()
-    r=metropolis(F=F,G=G,T=T0e,X_0=X0,maxsteps=waitsteps)
-    Paccept=sum(ac for ac in r.Ac if ac>0)/len(r.Ac)
-    print(f"T0e {T0e} Paccept {Paccept} steps {nsteps+waitsteps}")
-    if Paccept<=Paccept_sol:
-      break
-    T0e/=factor
-    nsteps+=waitsteps
+  T0i,T0e,nsteps=findT(F,G,_fX0,Tstart,T0max,T0min,waitsteps,Paccept_tgt,
+                       Paccept_sol,factor)
   np.save(out_T1,T0e)
   np.save(out_T0,T0i)
   np.save(out_stepsused,nsteps)
 
-
-def same(l,rtol)->bool:
-  return all(np.isclose(x,l[-1],rtol=rtol) for x in l)
 
 
 def _worker(ref_T0,decay,rtol,patience,out_results,name,
@@ -244,49 +282,30 @@ def _worker(ref_T0,decay,rtol,patience,out_results,name,
   print(ref_T0)
   numpy.random.seed(13*rindex)
   T=float(np.load(ref_T0.out_T0))
-  assert T>0.0, f"T0={T}<=0.0 ??"
   T1=np.load(ref_T0.out_T1)
-  assert T1>0.0, f"T1={T1}<=0.0 ??"
   t=tload(ref_T0.ref_koef._rref)
-  maxaccepts2=t.size if maxaccepts is None else maxaccepts
-  task_size=ref_T0.ref_koef.task_size
-  budget=task_size-np.load(ref_T0.out_stepsused)
-  assert budget>0, f"{budget}<=0 ??"
   dim=ref_T0.dim
-  X0=np_choice(range(int(task_size**(1/dim))),size=(dim,)).tolist()
+  X0=np_choice(range(int(t.size**(1/dim))),size=(dim,)).tolist()
   F=partial(teval_dim,t=t)
   G=partial(tsuggestX_dim,t=t)
-  rs:List[MetropolisResults[List[int]]]=[]
-  while True:
-    maxloops=log(T1/T,decay)
-    if budget<=0 or maxloops<=0:
-      break
-    maxsteps=min(1000,task_size/20,int(budget/maxloops)) # Maxsteps per T
-    assert maxsteps>0, f"{maxsteps}<=0 ??"
-    rs.append(metropolis(F=F,G=G,T=T,X_0=rs[-1].Xs[-1] if rs else X0,
-                         maxaccepts=maxaccepts2,
-                         maxsteps=maxsteps))
-    nsteps=sum(len(r.Xs) for r in rs)
-    solutions=[r.Ys[-1] for r in rs[-patience:]]
-    print(f"T {T:0.3f} ns {nsteps} bu {budget} ms {maxsteps} : {solutions}")
-    if len(solutions)==patience and same(solutions,rtol):
-      break
+  for rs in anneal(t,F,G,T,T1,X0,decay,
+                   maxaccepts,stepused=np.load(ref_T0.out_stepsused),
+                   patience=patience,rtol=rtol):
+    acc=[]
+    for r in rs:
+      dd=r.to_dict() # type: ignore
+      acc.append(dd)
     with open(out_results,'w') as f:
-      acc=[]
-      for r in rs:
-        dd=r.to_dict() # type: ignore
-        acc.append(dd)
       json_dump(acc,f,indent=4)
-    T*=decay
-    budget-=len(rs[-1].Xs)
-    np.save(out_rindex,rindex)
+
+  np.save(out_rindex,rindex)
 
 @autostage_(decay=0.85,
             rtol=0.01,
             patience=3,
             out_results=[selfref,'results.json'],
             out_rindex=[selfref,'rindex.npy'],
-            sourcedeps=[_worker,metropolis,teval,tsuggestX_dim],
+            sourcedeps=[_worker,metropolis,teval,tsuggestX_dim,anneal],
             maxaccepts=100,
             maxsteps=None,
             name='annealing',

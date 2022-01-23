@@ -1,4 +1,6 @@
 import sympy
+import numpy as np
+import matplotlib.pyplot as plt
 
 from pylightnix import (Registry, Config, Build, DRef, RRef, realize1,
                         instantiate, mklens, mkdrv, mkconfig, selfref,
@@ -20,7 +22,6 @@ from dataclasses import dataclass
 from itertools import chain
 from os.path import join, dirname
 
-import matplotlib.pyplot as plt
 from matplotlib.pyplot import plot, hist, subplots
 from dataclasses_json import dataclass_json
 
@@ -127,6 +128,15 @@ class MetropolisResults(Generic[V]):
   Ac:List[int]
   T:float
 
+def transmat(nX:int,H:Callable[[V],int],mr:MetropolisResults[V])->np.ndarray:
+  """ `H` should return the number of its arguemnt `x` in the set of X. """
+  ans=np.zeros(shape=[nX,nX],dtype=float)
+  for i in range(len(mr.Xs)-1):
+    src,dst=H(mr.Xs[i]),H(mr.Xs[i+1])
+    assert src<nX and dst<nX
+    ans[src,dst]+=1
+  ans/=np.sum(ans,axis=1).reshape(nX,1)
+  return ans
 
 
 def metropolis(F:Callable[[V],float],
@@ -198,7 +208,7 @@ def same(l,rtol)->bool:
   return all(np.isclose(x,l[-1],rtol=rtol) for x in l)
 
 
-def anneal(S,T,T1,X0,decay,budget=0,patience=3,rtol=0.01):
+def anneal(S,T,T1,X0,decay=0.85,budget=0,patience=3,rtol=0.01):
   assert T>0.0, f"T0={T}<=0.0 ??"
   assert T1>0.0, f"T1={T1}<=0.0 ??"
   assert budget>0, f"{budget}<=0 ??"

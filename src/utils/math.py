@@ -1,4 +1,4 @@
-from math import exp
+from math import exp,log
 from typing import (Optional,List,Dict,Any,Tuple)
 
 Bit=int

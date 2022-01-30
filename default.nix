@@ -91,6 +91,7 @@ let
           graph-tool
           pygobject3
           ipdb
+          scipy
 
           matplotlib
           pyqt5
@@ -118,19 +119,19 @@ let
 
       shell = pkgs.mkShell {
         name = "shell";
-        buildInputs = [
+        buildInputs = with pkgs; [
           mypython
-          pkgs.pandoc
-          pkgs.poppler
-          pkgs.poppler_utils
-          pkgs.cairo
-          pkgs.feh
+          pandoc
+          poppler
+          poppler_utils
+          cairo
+          feh
           python.grip
-          pkgs.imagemagick
-          pkgs.gnome3.eog
-          pkgs.gobject-introspection
-          pkgs.gtk3
-          pkgs.gdb
+          imagemagick
+          gnome3.eog
+          gobject-introspection
+          gtk3
+          gdb
 
           (let
              mytexlive = pkgs.texlive.override { python3=mypython; };

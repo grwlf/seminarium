@@ -13,7 +13,7 @@ from pylightnix import *
 
 from seminarium.MCMC import (anneal,findT,metropolis,MetropolisResults,transmat)
 
-DIM=6
+DIM=4
 B0=[False for _ in range(DIM)]
 
 
@@ -25,9 +25,9 @@ def maxcnf_eval(x:np.ndarray)->int:
   ans+=(x[0]==1 or x[1]==1)
   ans+=(x[0]==0 or x[2]==0)
   ans+=(x[2]==1 or x[1]==1)
-  ans+=(x[0]==0 or x[5]==1)
+  # ans+=(x[0]==0 or x[5]==1)
   ans+=(x[3]==1 or x[2]==0)
-  ans+=(x[5]==0 or x[1]==1)
+  # ans+=(x[5]==0 or x[1]==1)
   return -ans
 
 def maxcnf_suggest(x:np.ndarray)->np.ndarray:
@@ -75,11 +75,40 @@ def test_transmat():
   T=10
   maxsteps=10000
   mr=metropolis(F=F,G=G,T=T,X_0=X0,maxsteps=maxsteps)
-  print(mr)
+  # print(mr)
   tm=transmat(2**DIM,maxcf_serialize,mr)
-  print(tm)
+  # print(tm)
   assert_allclose(np.ones(shape=(2**DIM,)),np.sum(tm,axis=1))
-  print(eig(tm)[0])
+  print(sorted([abs(ev) for ev in eig(tm)[0]]))
+
+
+def test_transmat2():
+  F=maxcnf_eval
+  G=maxcnf_suggest
+  X0=maxcnf_init()
+  T=10
+  maxsteps=100000
+  acc=[]
+  while True:
+    if T<0.5:
+      break
+    mr=metropolis(F=F,G=G,T=T,X_0=X0,maxsteps=maxsteps)
+    print(mr)
+    tm=transmat(2**DIM,maxcf_serialize,mr)
+    print(tm)
+    assert_allclose(np.ones(shape=(2**DIM,)),np.sum(tm,axis=1))
+    evs=eig(tm)[0]
+    evsA=list(sorted([abs(ev) for ev in evs]))
+    acc.append((T,evsA))
+    T=T/2.0
+  plt.figure()
+  plt.gca().invert_xaxis()
+  for n in range(len(acc[0][1])):
+    plt.semilogx([t[0] for t in acc],[t[1][n] for t in acc])
+  plt.grid()
+  plt.show()
+
+
 
 def flatten(x:np.ndarray)->int:
   """ Convert `x` in to an integer, treating it as binary representation """

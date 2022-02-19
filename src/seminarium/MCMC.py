@@ -35,7 +35,7 @@ def pool_starstarmap(p:pool.Pool, f:Callable[...,Any], lkwargs:List[dict]):
   p.map(partial(_f,f=f),lkwargs)
 
 
-plt.style.use('dark_background')
+# plt.style.use('dark_background')
 # fsinit(join(dirname(__file__),'..','..','_pylightnix'),use_as_default=True)
 
 @dataclass_json

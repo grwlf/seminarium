@@ -131,36 +131,60 @@ def vec_suggest(n:int, vec:np.ndarray) -> np.ndarray:
   #   if (vec2!=vec).any():
   #     break
   # return vec2
-  vec3=np.random.choice([0,1],size=(n,))
+  vec3=np.random.choice([0,1],size=(n,)) # Gives `G_j==(1/2**n)`
   return vec3
 
 def formula_transmat_numeric(clauses,n,T=1.0,maxsteps=1000,
                              normalized=True)->np.ndarray:
+  """ Should be close enough to the `formula_transmat_mcmc` """
   F=lambda vec:formula_to_energy(clauses,n,vec=vec)
   G=lambda vec:vec_suggest(n=n,vec=vec)
   vec0=np.random.choice([0,1],size=(n,))
   mr=metropolis(F=F,G=G,T=T,X_0=vec0,maxsteps=maxsteps)
-  # print(mr)
   tm=transmat(2**n,vec_hash,mr,normalized=normalized)
   return tm
 
 
-def formula_transmat_mcmc(clauses, n, T=1.0,
-                          normalized=True) -> np.ndarray:
-  pi=formula_stationary_dist(clauses,n,T)
+def formula_transmat_mcmc(clauses, n, T=1.0, G_j=None,
+                          normalized=True)->np.ndarray:
+  """ Calculate the stochastic matrix `P` of the metropolis process.
+  `G_j` is the generator's probability to suggest an j-th vector when the
+  current state is `i`. By default the uniform distribution is used. """
   M=np.zeros(shape=(2**n,2**n),dtype=float)
-  Z=0.0
   F=lambda v:formula_to_energy(clauses,n,np.array(i2bits(v,nbits=n),dtype=int))
+  G_j=1/(2**n) if G_j is None else G_j
   for i in range(2**n):
     ei=F(i)
     for j in range(2**n):
-      ej=F(j)
-      if i!=j:
-        M[i,j]=1.0 if ej<ei else math.exp((ei-ej)/T)
-    M[i,i]=sum([(1-M[i,j])*(1/((2**n))) for j in range(2**n)])
+      if j!=i:
+        ej=F(j)
+        M[i,j]=G_j*(1.0 if ej<ei else math.exp((ei-ej)/T))
+    M[i,i]=sum([G_j-M[i,j] for j in range(2**n)])
   if normalized:
     M/=np.sum(M,axis=1).reshape(2**n,1)
   return M
+
+
+def formula_plot_classic_gap(clauses, n, T0=2, T1=0.001):
+  maxn=100
+  def Tn(n):
+    return (1.0-n/maxn)*T0 + n/maxn*T1
+  acc=[]
+  for t in range(maxn):
+    T=Tn(t)
+    P=formula_transmat_mcmc(clauses,n,T=T)
+    evs=np.linalg.eig(P)[0]
+    evsA=list(sorted([abs(ev) for ev in evs]))
+    acc.append((T,evsA))
+
+  plt.figure()
+  plt.gca().invert_xaxis()
+  for i in range(len(acc[0][1])):
+    plt.plot([t[0] for t in acc],[t[1][i] for t in acc])
+  plt.title(f'Eigenvalues of MCMC stochastic matrices\nfor {(clauses,n)}')
+  plt.gca().set_xlabel('Temperature')
+  plt.grid()
+  plt.show()
 
 
 def spectrac_gap(op):
@@ -209,7 +233,7 @@ def spectrac_gap(op):
 
 # """Solve Schroedinger equation, plot spectrum and demonstrate convergency."""
 
-def formula_schroedinger(clauses, n, T=1000.0):
+def formula_plot_schroedinger_gap(clauses, n, T=1000.0):
   dim=2**n
   H0 = pauli_z_index(1, n) + pauli_x_index(2, n)
   H1 = formula_to_operator(clauses, n)
@@ -232,8 +256,9 @@ def formula_schroedinger(clauses, n, T=1000.0):
   print(np.abs(psiT))
 
   plt.figure()
-  plt.title('Spectrum')
+  plt.title(f'Spectrum\nfor {(clauses,n)}')
   plt.plot(spectrum)
+  plt.grid()
   plt.show()
 
   # plt.figure()

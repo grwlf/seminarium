@@ -15,8 +15,12 @@ from pprint import pprint
 import scipy.integrate
 import matplotlib.pyplot as plt
 from itertools import starmap
+from typing import List,Tuple
 
-cache = lambda f: functools.lru_cache(maxsize=None)(f)
+from utils.math import i2bits,bits2i
+
+def cache(f):
+  return functools.lru_cache(maxsize=None)(f)
 
 @cache
 def unit1():
@@ -75,15 +79,43 @@ def formula_to_operator(clauses, n):
 
 def variable_to_beval(i, n):
   assert i != 0
-  return lambda vec: vec[abs(i-1)] if i>0 else not vec[abs(i-1)]
+  return lambda vec: vec[abs(i)-1] if i>0 else 1-vec[abs(i)-1]
 
 def clause_to_beval(x, y, n):
   return lambda vec : variable_to_beval(x, n)(vec) or \
                       variable_to_beval(y, n)(vec)
 
-def formula_to_beval(clauses, n, vec):
+# bool encoded as integers: 0 - False, 1 - True
+BInt = int
+BVec = List[BInt]
+
+def formula_to_bvals(clauses, n, vec:BVec) -> List[BInt]:
+  assert all(x in [0,1] for x in vec)
   mapper = lambda clause: [clause_to_beval(clause[0], clause[1], n)]
   return list(starmap(lambda f:f(vec),list(map(mapper, clauses))))
+
+def formula_to_energy(clauses, n, vec:BVec) -> int:
+  """ The energy of a formula is the sum of it's clauses truth values converted
+  to ints according to the rule: True -> 1, False -> 0"""
+  return sum(formula_to_bvals(clauses, n, vec))
+
+
+def formula_to_pivec(clauses, n, T=1.0) -> Tuple[np.ndarray,float]:
+  """ Return a probability vector of the Markov chain, defined by `clauses`
+  formula, along with it's Z norm factor. `n` is the number of boolean variables
+  in the formula."""
+  pi=np.zeros(shape=(2**n,))
+  Z=0.0
+  for i in range(2**n):
+    pi[i]=np.exp( -float(formula_to_energy(clauses, n, i2bits(i,nbits=n))) / T)
+    Z+=pi[i]
+  return pi,Z
+
+
+# def formula_to_Pmat(clauses, n, T=1.0) -> np.ndarray:
+#   """ Calculate the transition matrix of the formula defined by 'clauses' """
+#   pass
+
 
 def spectrac_gap(op):
   eps = 1e-16
@@ -98,7 +130,6 @@ def spectrac_gap(op):
 # \00> - True True
 # formula_to_operator([(1, 2), (1, -2), (-1, 2), (-1, -2)], 2)
 
-# formula_to_beval([(1, 1)], 1)([True,True])
 
 # spectrac_gap(formula_to_operator(((1, 2), (1, -2)), 2))
 

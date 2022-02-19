@@ -16,6 +16,7 @@ import scipy.integrate
 import matplotlib.pyplot as plt
 from itertools import starmap
 from typing import List,Tuple
+from functools import partial
 
 from utils.math import i2bits,bits2i
 
@@ -87,34 +88,79 @@ def clause_to_beval(x, y, n):
 
 # bool encoded as integers: 0 - False, 1 - True
 BInt = int
-BVec = List[BInt]
+BVec = np.ndarray
 
 def formula_to_bvals(clauses, n, vec:BVec) -> List[BInt]:
-  assert all(x in [0,1] for x in vec)
+  assert all(x in [0,1] for x in vec.tolist())
   mapper = lambda clause: [clause_to_beval(clause[0], clause[1], n)]
   return list(starmap(lambda f:f(vec),list(map(mapper, clauses))))
 
-def formula_to_energy(clauses, n, vec:BVec) -> int:
+def formula_to_energy(clauses, n, vec:BVec) -> float:
   """ The energy of a formula is the sum of it's clauses truth values converted
   to ints according to the rule: True -> 1, False -> 0"""
-  return sum(formula_to_bvals(clauses, n, vec))
+  return -float(sum(formula_to_bvals(clauses, n, vec)))
 
 
-def formula_to_pivec(clauses, n, T=1.0) -> Tuple[np.ndarray,float]:
+def vec_hash(vec:np.ndarray)->int:
+  return bits2i(vec.tolist())
+
+from seminarium.MCMC import metropolis, transmat
+
+
+def formula_stationary_dist(clauses,n,T=1.0,normalized=True) -> np.ndarray:
   """ Return a probability vector of the Markov chain, defined by `clauses`
   formula, along with it's Z norm factor. `n` is the number of boolean variables
   in the formula."""
-  pi=np.zeros(shape=(2**n,))
+  pi=np.zeros(shape=(2**n,),dtype=float)
   Z=0.0
   for i in range(2**n):
-    pi[i]=np.exp( -float(formula_to_energy(clauses, n, i2bits(i,nbits=n))) / T)
+    vec=np.array(i2bits(i,nbits=n))
+    pi[i]=np.exp( -float(formula_to_energy(clauses,n,vec)) / T)
     Z+=pi[i]
-  return pi,Z
+  if normalized:
+    pi/=Z
+  return pi
+
+def vec_suggest(n:int, vec:np.ndarray) -> np.ndarray:
+  assert vec.shape==(n,), f"{vec.shape}"
+  assert all((x in [0,1]) for x in vec.tolist())
+  # while True:
+  #   delta=np.random.choice([1,0],size=(n,))
+  #   vec2=np.array(vec+delta)
+  #   vec2[vec2==2]=0
+  #   if (vec2!=vec).any():
+  #     break
+  # return vec2
+  vec3=np.random.choice([0,1],size=(n,))
+  return vec3
+
+def formula_transmat_numeric(clauses,n,T=1.0,maxsteps=1000,
+                             normalized=True)->np.ndarray:
+  F=lambda vec:formula_to_energy(clauses,n,vec=vec)
+  G=lambda vec:vec_suggest(n=n,vec=vec)
+  vec0=np.random.choice([0,1],size=(n,))
+  mr=metropolis(F=F,G=G,T=T,X_0=vec0,maxsteps=maxsteps)
+  # print(mr)
+  tm=transmat(2**n,vec_hash,mr,normalized=normalized)
+  return tm
 
 
-# def formula_to_Pmat(clauses, n, T=1.0) -> np.ndarray:
-#   """ Calculate the transition matrix of the formula defined by 'clauses' """
-#   pass
+def formula_transmat_mcmc(clauses, n, T=1.0,
+                          normalized=True) -> np.ndarray:
+  pi=formula_stationary_dist(clauses,n,T)
+  M=np.zeros(shape=(2**n,2**n),dtype=float)
+  Z=0.0
+  F=lambda v:formula_to_energy(clauses,n,np.array(i2bits(v,nbits=n),dtype=int))
+  for i in range(2**n):
+    ei=F(i)
+    for j in range(2**n):
+      ej=F(j)
+      if i!=j:
+        M[i,j]=1.0 if ej<ei else math.exp((ei-ej)/T)
+    M[i,i]=sum([(1-M[i,j])*(1/((2**n))) for j in range(2**n)])
+  if normalized:
+    M/=np.sum(M,axis=1).reshape(2**n,1)
+  return M
 
 
 def spectrac_gap(op):
@@ -163,6 +209,39 @@ def spectrac_gap(op):
 
 # """Solve Schroedinger equation, plot spectrum and demonstrate convergency."""
 
+def formula_schroedinger(clauses, n, T=1000.0):
+  dim=2**n
+  H0 = pauli_z_index(1, n) + pauli_x_index(2, n)
+  H1 = formula_to_operator(clauses, n)
+  _, v = np.linalg.eigh(H0)
+  psi0 = v[:, 0]
+  def Ht(t):
+    return (1 - t/T) * H0 + t/T * H1
+  def schroedenger_rhs(t, psi_):
+    return -1j * Ht(t) @ psi_
+  sol = scipy.integrate.solve_ivp(schroedenger_rhs, (0, T), psi0 + 0j)
+
+  numpoints = len(sol['t'])
+  spectrum = np.zeros((numpoints, dim))
+
+  for i in range(numpoints):
+    spectrum[i, :], _ = np.linalg.eigh(Ht(sol['t'][i]))
+
+  psiT = sol['y'][:, -1]
+
+  print(np.abs(psiT))
+
+  plt.figure()
+  plt.title('Spectrum')
+  plt.plot(spectrum)
+  plt.show()
+
+  # plt.figure()
+  # plt.title(f'Psi(t) for t = T (={T})')
+  # plt.bar(range(dim), np.abs(psiT))
+  # plt.show()
+
+
 # n = 2
 # dim = 2 ** n
 
@@ -183,8 +262,8 @@ def spectrac_gap(op):
 
 # T = 1000.0
 
-# def Ht(t):
-#   return (1 - t/T) * H0 + t/T * H1
+# # def Ht(t):
+# #   return (1 - t/T) * H0 + t/T * H1
 
 # def schroedenger_rhs(t, psi_):
 #   return -1j * Ht(t) @ psi_

@@ -128,14 +128,17 @@ class MetropolisResults(Generic[V]):
   Ac:List[int]
   T:float
 
-def transmat(nX:int,H:Callable[[V],int],mr:MetropolisResults[V])->np.ndarray:
+def transmat(nX:int,H:Callable[[V],int],mr:MetropolisResults[V],
+             normalized:bool=True)->np.ndarray:
   """ `H` should return the number of its arguemnt `x` in the set of X. """
   ans=np.zeros(shape=[nX,nX],dtype=float)
   for i in range(len(mr.Xs)-1):
     src,dst=H(mr.Xs[i]),H(mr.Xs[i+1])
-    assert src<nX and dst<nX
+    assert src<nX and dst<nX, f"{src}<{nX} and {dst}<{nX}"
+    # print(i,'--',src,dst)
     ans[src,dst]+=1
-  ans/=np.sum(ans,axis=1).reshape(nX,1)
+  if normalized:
+    ans/=np.sum(ans,axis=1).reshape(nX,1)
   return ans
 
 
@@ -163,6 +166,8 @@ def metropolis(F:Callable[[V],float],
       Ps.append(1.0)
     else:
       Ps.append(exp((Y-Y2)/T))
+    # if X.tolist()==[0,0] and X2.tolist()==[0,1]:
+    #   print(Y,Y2,Ps[-1])
     assert Ps[-1]>=0.0
     assert Ps[-1]<=1.0
     accept=np_choice([True,False],p=[Ps[-1],1.0-Ps[-1]])
